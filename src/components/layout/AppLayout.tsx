@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { cn } from '../../lib/utils';
+import { Toaster } from 'sonner';
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { currentUser, switchUser } = useStore();
@@ -136,6 +137,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      <Toaster position="bottom-right" richColors />
     </div>
   );
 }

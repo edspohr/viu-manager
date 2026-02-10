@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { AppLayout } from './components/layout/AppLayout';
 import { AdminDashboard } from './views/AdminDashboard';
 import { ClientPortal } from './views/ClientPortal';
@@ -6,6 +7,11 @@ import { useStore } from './store/useStore';
 
 function App() {
   const { currentUser } = useStore();
+
+  useEffect(() => {
+    const isDark = currentUser === 'operations';
+    document.documentElement.classList.toggle('dark', isDark);
+  }, [currentUser]);
 
   const renderView = () => {
     switch (currentUser) {

@@ -1,14 +1,22 @@
+import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { 
   Package, 
   CheckCircle2, 
   AlertOctagon, 
-  FileText
+  FileText,
+  PenTool,
+  Lock
 } from 'lucide-react';
+import { Modal } from '../components/common/Modal';
+import { toast } from 'sonner';
 
 export function ClientPortal() {
   const { customers, orders, approveOrder } = useStore();
+  const [selectedOrderForApproval, setSelectedOrderForApproval] = useState<string | null>(null);
+  const [rut, setRut] = useState('');
+  const [isSigned, setIsSigned] = useState(false);
   
   // Hardcoded for demo: "Fashion Park"
   const currentClient = customers.find(c => c.id === 'c1');
@@ -18,6 +26,28 @@ export function ClientPortal() {
   const activeOrders = clientOrders.filter(o => ['En Producción', 'Despacho'].includes(o.status));
 
   if (!currentClient) return <div>Cliente no encontrado</div>;
+
+  const orderToApprove = orders.find(o => o.id === selectedOrderForApproval);
+
+  const handleApprove = () => {
+    if (!orderToApprove) return;
+    if (!rut) {
+      toast.error('Debes ingresar tu RUT para firmar');
+      return;
+    }
+    if (!isSigned) {
+      toast.error('Debes firmar el documento');
+      return;
+    }
+
+    approveOrder(orderToApprove.id);
+    toast.success('Orden Aprobada y enviada a Producción', {
+      description: `Pedido ${orderToApprove.campaignName} iniciado.`
+    });
+    setSelectedOrderForApproval(null);
+    setRut('');
+    setIsSigned(false);
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
@@ -71,7 +101,7 @@ export function ClientPortal() {
                       </div>
                       
                       <button 
-                        onClick={() => approveOrder(order.id)}
+                        onClick={() => setSelectedOrderForApproval(order.id)}
                         className="w-full md:w-auto px-8 py-3 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center justify-center gap-2"
                       >
                          <CheckCircle2 className="h-5 w-5" />
@@ -132,6 +162,86 @@ export function ClientPortal() {
              </table>
           </div>
        </section>
+
+       {/* Signature Modal */}
+       <Modal
+          isOpen={!!selectedOrderForApproval}
+          onClose={() => setSelectedOrderForApproval(null)}
+          title="Firma Digital de Aprobación"
+          variant="signature"
+          footer={
+             <div className="flex w-full items-center justify-between">
+                <p className="text-xs text-slate-400 flex items-center gap-1">
+                   <Lock className="h-3 w-3" /> Encriptado SSL 256-bit
+                </p>
+                <div className="flex gap-3">
+                   <button 
+                      onClick={() => setSelectedOrderForApproval(null)}
+                      className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium"
+                   >
+                      Cancelar
+                   </button>
+                   <button 
+                      onClick={handleApprove}
+                      disabled={!isSigned || !rut}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                   >
+                      Confirmar Orden
+                   </button>
+                </div>
+             </div>
+          }
+       >
+          <div className="space-y-6">
+             <div className="bg-slate-50 p-6 rounded-xl text-center border border-slate-200">
+                <p className="text-sm text-slate-500 uppercase font-bold tracking-wider mb-1">Monto Total a Aprobar</p>
+                <p className="text-4xl font-bold text-slate-900">
+                   {orderToApprove && new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(orderToApprove.totalAmount)}
+                </p>
+             </div>
+
+             <div className="space-y-4">
+                <div>
+                   <label className="block text-sm font-medium text-slate-700 mb-1">RUT / DNI del Aprobador</label>
+                   <input 
+                      type="text" 
+                      value={rut}
+                      onChange={(e) => setRut(e.target.value)}
+                      placeholder="12.345.678-9"
+                      className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                   />
+                </div>
+                
+                <div>
+                   <label className="block text-sm font-medium text-slate-700 mb-1">Firma en el recuadro</label>
+                   <div 
+                      onClick={() => setIsSigned(true)}
+                      className={cn(
+                         "h-32 w-full rounded-lg border-2 border-dashed flex items-center justify-center cursor-pointer transition-all relative overflow-hidden",
+                         isSigned ? "border-emerald-500 bg-emerald-50/30" : "border-slate-300 bg-slate-50 hover:border-slate-400"
+                      )}
+                   >
+                      {!isSigned ? (
+                         <div className="text-slate-400 flex flex-col items-center gap-2">
+                            <PenTool className="h-6 w-6" />
+                            <span className="text-sm">Click aquí para firmar</span>
+                         </div>
+                      ) : (
+                         <div className="w-full h-full flex items-center justify-center">
+                            <svg viewBox="0 0 200 60" className="w-48 text-emerald-600 opacity-80" fill="none" stroke="currentColor" strokeWidth="3">
+                               <path d="M10,50 Q40,10 70,40 T150,20" />
+                            </svg>
+                            <div className="absolute top-2 right-2 bg-white/80 backdrop-blur rounded-full p-1 shadow-sm">
+                               <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                            </div>
+                         </div>
+                      )}
+                   </div>
+                   <p className="text-xs text-slate-500 mt-1">Al firmar, aceptas los Términos y Condiciones de Producción.</p>
+                </div>
+             </div>
+          </div>
+       </Modal>
     </div>
   );
 }
