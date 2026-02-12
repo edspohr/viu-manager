@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import type { Order } from '../../data/mockData';
 import { AICotizadorModal } from '../modals/AICotizadorModal';
+import { PricingConfigModal } from '../modals/PricingConfigModal';
 
 // --- Configuration ---
 
@@ -137,6 +138,7 @@ export function KanbanBoard() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
 
   // --- Filtering Logic ---
   const filteredOrders = useMemo(() => {
@@ -265,7 +267,10 @@ export function KanbanBoard() {
           )}
           
           {currentUser.role === 'superadmin' && (
-            <button className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors">
+            <button 
+              onClick={() => setIsConfigModalOpen(true)}
+              className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
+            >
               <Settings size={20} />
             </button>
           )}
@@ -335,6 +340,7 @@ export function KanbanBoard() {
 
       {/* Modals */}
       <AICotizadorModal isOpen={isAIModalOpen} onClose={() => setIsAIModalOpen(false)} />
+      <PricingConfigModal isOpen={isConfigModalOpen} onClose={() => setIsConfigModalOpen(false)} />
       
       {/* Simple Details Modal for this Refactor */}
       {selectedOrder && (
