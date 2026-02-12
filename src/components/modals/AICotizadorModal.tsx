@@ -27,13 +27,49 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
   const { addOrder } = useStore();
   const [step, setStep] = useState<'input' | 'processing' | 'result'>('input');
   const [emailText, setEmailText] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files) {
+      setFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const fileToGenerativePart = async (file: File) => {
+    const base64EncodedDataPromise = new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+      reader.readAsDataURL(file);
+    });
+    return {
+      inlineData: {
+        data: await base64EncodedDataPromise,
+        mimeType: file.type,
+      },
+    };
+  };
+
   const handleAnalyze = async () => {
-    if (!emailText.trim()) return;
+    if (!emailText.trim() && files.length === 0) return;
     setStep('processing');
     setError(null);
     
@@ -46,9 +82,9 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
       
       const prompt = `
         Act as an expert estimator for a large format printing company.
-        Analyze the following customer request text and extract the technical requirements.
+        Analyze the following customer request text and attached images (if any) to extract the technical requirements.
         
-        Request: "${emailText}"
+        Request Text: "${emailText}"
         
         Return ONLY a raw JSON object (no markdown formatting, no code blocks) with the following structure:
         {
@@ -62,7 +98,11 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
         }
       `;
 
-      const result = await model.generateContent(prompt);
+      const imageParts = await Promise.all(
+        files.map(fileToGenerativePart)
+      );
+
+      const result = await model.generateContent([prompt, ...imageParts]);
       const response = await result.response;
       const text = response.text();
       
@@ -110,6 +150,7 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
     setTimeout(() => {
       setStep('input');
       setEmailText('');
+      setFiles([]);
       setAnalysisResult(null);
     }, 500);
   };
@@ -156,12 +197,50 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
               {/* Right: Dropzone */}
               <div className="flex flex-col h-full">
                 <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Archivos Adjuntos (PDF / Imágenes)</label>
-                <div className="flex-1 border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl flex flex-col items-center justify-center bg-zinc-50/50 dark:bg-zinc-800/20 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer group">
-                  <div className="w-16 h-16 bg-white dark:bg-zinc-800 rounded-full shadow-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-200">
-                    <Upload className="text-zinc-400" size={24} />
-                  </div>
-                  <p className="text-zinc-600 dark:text-zinc-400 font-medium">Arrastra archivos aquí</p>
-                  <p className="text-zinc-400 dark:text-zinc-500 text-xs mt-1">Support: PDF, JPG, PNG</p>
+                <div 
+                  className="flex-1 border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl flex flex-col items-center justify-center bg-zinc-50/50 dark:bg-zinc-800/20 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer group relative"
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                >
+                  <input 
+                    type="file" 
+                    multiple 
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    onChange={handleFileChange}
+                    accept="image/*,application/pdf"
+                  />
+                  
+                  {files.length === 0 ? (
+                    <>
+                      <div className="w-16 h-16 bg-white dark:bg-zinc-800 rounded-full shadow-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-200">
+                        <Upload className="text-zinc-400" size={24} />
+                      </div>
+                      <p className="text-zinc-600 dark:text-zinc-400 font-medium">Arrastra archivos aquí</p>
+                      <p className="text-zinc-400 dark:text-zinc-500 text-xs mt-1">Support: PDF, JPG, PNG</p>
+                    </>
+                  ) : (
+                    <div className="w-full h-full p-4 overflow-y-auto">
+                      <p className="text-center text-zinc-500 mb-2">{files.length} archivo(s) seleccionado(s)</p>
+                      <div className="space-y-2">
+                        {files.map((f, i) => (
+                           <div key={i} className="flex items-center justify-between p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm">
+                             <span className="truncate max-w-[200px] text-zinc-700 dark:text-zinc-300">{f.name}</span>
+                             <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                removeFile(i);
+                              }}
+                              className="text-zinc-400 hover:text-red-500"
+                             >
+                                <X size={14} />
+                             </button>
+                           </div>
+                        ))}
+                      </div>
+                      <p className="text-center text-xs text-zinc-400 mt-4">Click o arrastrar para agregar más</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -231,7 +310,7 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
           {step === 'input' ? (
             <button 
               onClick={handleAnalyze}
-              disabled={!emailText.trim()}
+              disabled={!emailText.trim() && files.length === 0}
               className="px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
             >
               Analizar con Gemini <Sparkles size={16} />
