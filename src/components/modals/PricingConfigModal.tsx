@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { X, Save, DollarSign, Settings, Percent, Clock } from 'lucide-react';
 
@@ -12,11 +12,7 @@ export const PricingConfigModal = ({ isOpen, onClose }: PricingConfigModalProps)
   const { pricingConfig, updatePricingConfig } = useStore();
   const [formData, setFormData] = useState(pricingConfig);
 
-  useEffect(() => {
-    if (isOpen) {
-      setFormData(pricingConfig);
-    }
-  }, [isOpen, pricingConfig]);
+
 
   if (!isOpen) return null;
 
