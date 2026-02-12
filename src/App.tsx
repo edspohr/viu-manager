@@ -1,34 +1,27 @@
+
 import { useEffect } from 'react';
-import { AppLayout } from './components/layout/AppLayout';
-import { AdminDashboard } from './views/AdminDashboard';
-import { ClientPortal } from './views/ClientPortal';
-import { OperationsView } from './views/OperationsView';
-import { useStore } from './store/useStore';
+import { KanbanBoard } from './components/kanban/KanbanBoard';
+import { DevLoginModal } from './components/modals/DevLoginModal';
+
 
 function App() {
-  const { currentUser } = useStore();
 
   useEffect(() => {
-    const isDark = currentUser === 'operations';
-    document.documentElement.classList.toggle('dark', isDark);
-  }, [currentUser]);
-
-  const renderView = () => {
-    switch (currentUser) {
-      case 'client':
-        return <ClientPortal />;
-      case 'operations':
-        return <OperationsView />;
-      case 'admin':
-      default:
-        return <AdminDashboard />;
-    }
-  };
+    // Force dark mode logic or theme logic if needed, currently handling via Tailwind classes
+    // The previous app had a toggle, but for Premium Industrial we might stick to light/zinc-50 default 
+    // or respect system pref. For now, let's keep it clean.
+    document.documentElement.classList.remove('dark'); // Default to light industrial
+    // Or if we want dark mode support:
+    // if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    //   document.documentElement.classList.add('dark');
+    // }
+  }, []);
 
   return (
-    <AppLayout>
-      {renderView()}
-    </AppLayout>
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 font-sans selection:bg-zinc-900 selection:text-white">
+      <KanbanBoard />
+      <DevLoginModal />
+    </div>
   );
 }
 
