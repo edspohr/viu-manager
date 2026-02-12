@@ -72,7 +72,7 @@ export const useStore = create<AppState>()(
     {
       name: 'viu-manager-storage',
       version: 2, // Increment version to invalidate old state
-      migrate: (persistedState: any, version: number) => {
+      migrate: (persistedState: unknown, version: number) => {
         if (version < 2) {
           // If version is old, reset to default state
           return {
