@@ -1,50 +1,69 @@
-
-import { useState, useMemo } from 'react';
-import { 
-  DndContext, 
-  DragOverlay, 
-  closestCorners, 
-  PointerSensor, 
-  TouchSensor, 
-  useSensor, 
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
   useSensors,
   type DragStartEvent,
   type DragOverEvent,
   type DragEndEvent,
   defaultDropAnimationSideEffects,
-  type DropAnimation
+  type DropAnimation,
 } from '@dnd-kit/core';
-import { 
-  SortableContext, 
+import {
+  SortableContext,
   verticalListSortingStrategy,
-  useSortable
+  useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useStore } from '../../store/useStore';
+import { motion } from 'framer-motion';
+import { toast } from 'sonner';
+import { useStore, type UserRole } from '../../store/useStore';
 import { cn } from '../../lib/utils';
-import { 
-   Inbox,
-   Sparkles,
-   Settings,
-   Calendar,
-   CheckCircle2,
-   Box,
-   Truck,
-   Receipt
-} from 'lucide-react';
-import type { Order } from '../../data/mockData';
+import { formatCLP } from '../../lib/formatters';
+import { Inbox, Sparkles, Settings, CheckCircle2, Box, Truck, Receipt, Search, Plus } from 'lucide-react';
+import type { Order, Customer, Material } from '../../data/mockData';
+import { OrderCard } from './OrderCard';
+import { SkeletonCard } from '../ui/Skeleton';
 import { AICotizadorModal } from '../modals/AICotizadorModal';
 import { PricingConfigModal } from '../modals/PricingConfigModal';
+import { OrderDetailModal } from '../modals/OrderDetailModal';
 
-// --- Configuration ---
+// ─── Configuration ────────────────────────────────────────────────────────────
 
 const COLUMNS = [
-  { id: 'Solicitud', label: 'Solicitud', icon: Inbox, color: 'text-zinc-500' },
-  { id: 'Por Aprobar', label: 'Por Aprobar', icon: CheckCircle2, color: 'text-amber-500' },
-  { id: 'En Producción', label: 'Producción', icon: Box, color: 'text-blue-500' },
-  { id: 'Despacho', label: 'Despacho', icon: Truck, color: 'text-purple-500' },
-  { id: 'Terminado', label: 'Terminado', icon: Receipt, color: 'text-emerald-500' },
-];
+  { id: 'Solicitud',     label: 'Solicitud',   icon: Inbox,        color: 'text-zinc-500',    accent: 'zinc'    },
+  { id: 'Por Aprobar',   label: 'Por Aprobar', icon: CheckCircle2, color: 'text-amber-500',   accent: 'amber'   },
+  { id: 'En Producción', label: 'Producción',  icon: Box,          color: 'text-blue-500',    accent: 'blue'    },
+  { id: 'Despacho',      label: 'Despacho',    icon: Truck,        color: 'text-purple-500',  accent: 'purple'  },
+  { id: 'Terminado',     label: 'Terminado',   icon: Receipt,      color: 'text-emerald-500', accent: 'emerald' },
+] as const;
+
+const COLUMN_OVER_BORDER: Record<string, string> = {
+  'Solicitud':     'border-zinc-400/70',
+  'Por Aprobar':   'border-amber-400/70',
+  'En Producción': 'border-blue-400/70',
+  'Despacho':      'border-purple-400/70',
+  'Terminado':     'border-emerald-400/70',
+};
+
+const COLUMN_GHOST_STYLE: Record<string, string> = {
+  'Solicitud':     'border-zinc-300   bg-zinc-100/60',
+  'Por Aprobar':   'border-amber-300  bg-amber-50/60',
+  'En Producción': 'border-blue-300   bg-blue-50/60',
+  'Despacho':      'border-purple-300 bg-purple-50/60',
+  'Terminado':     'border-emerald-300 bg-emerald-50/60',
+};
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Admin',
+  superadmin: 'Superadmin',
+  operations: 'Operaciones',
+  client: 'Cliente',
+};
 
 const dropAnimation: DropAnimation = {
   sideEffects: defaultDropAnimationSideEffects({
@@ -52,235 +71,285 @@ const dropAnimation: DropAnimation = {
   }),
 };
 
-// --- Components ---
+// ─── SortableItem ─────────────────────────────────────────────────────────────
 
-function OrderCard({ order, isOverlay = false, onClick }: { order: Order, isOverlay?: boolean, onClick?: () => void }) {
-  const { customers } = useStore();
-  const customerName = customers.find(c => c.id === order.customerId)?.name || 'Cliente';
-  
-  const statusColors = {
-    'Rojo': 'bg-rose-500',
-    'Amarillo': 'bg-amber-400',
-    'Verde': 'bg-emerald-500',
-  };
+function SortableItem({
+  order,
+  onClick,
+  disabled,
+  bouncing,
+  customers,
+  materials,
+}: {
+  order: Order;
+  onClick: () => void;
+  disabled?: boolean;
+  bouncing: boolean;
+  customers: Customer[];
+  materials: Material[];
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: order.id, data: { order }, disabled });
 
-  return (
-    <div 
-      onClick={onClick}
-      className={cn(
-        "group bg-white dark:bg-zinc-900 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md hover:border-zinc-300 dark:hover:border-zinc-700 transition-all cursor-pointer relative",
-        isOverlay ? "shadow-2xl scale-105 rotate-1 bg-white ring-1 ring-zinc-900/5" : ""
-      )}
-    >
-      {/* File Status Indicator */}
-      <div className={cn("absolute top-4 right-4 w-2 h-2 rounded-full", statusColors[order.fileStatus])} />
-
-      <div className="mb-3">
-        <h4 className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm leading-tight pr-4">{order.campaignName}</h4>
-        <p className="text-xs text-zinc-500 mt-1 font-medium">{customerName}</p>
-      </div>
-      
-      <div className="flex items-center justify-between mt-4 text-xs text-zinc-400">
-        <div className="flex items-center gap-1.5">
-           <span className="font-mono text-zinc-500">{order.id}</span>
-        </div>
-        {order.deliveryDate && (
-          <div className="flex items-center gap-1.5 bg-zinc-50 dark:bg-zinc-800 px-2 py-1 rounded-md text-zinc-600 dark:text-zinc-400">
-             <Calendar size={12} />
-             <span>{new Date(order.deliveryDate).toLocaleDateString()}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SortableItem({ order, onClick, disabled }: { order: Order, onClick: () => void, disabled?: boolean }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ 
-    id: order.id, 
-    data: { order },
-    disabled: disabled
-  });
-
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    transition,
-  };
+  const style = { transform: CSS.Translate.toString(transform), transition };
+  const ghostClass = COLUMN_GHOST_STYLE[order.status] ?? 'border-zinc-300 bg-zinc-50';
 
   if (isDragging) {
     return (
-      <div 
-        ref={setNodeRef} 
-        style={style} 
-        className="opacity-40 p-4 rounded-xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50 h-[100px]"
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={cn(
+          'rounded-xl border-2 border-dashed h-[108px] opacity-60',
+          ghostClass
+        )}
       />
     );
   }
 
+  const customer = customers.find((c) => c.id === order.customerId);
+
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <OrderCard order={order} onClick={onClick} />
+      <OrderCard
+        order={order}
+        customer={customer}
+        materials={materials}
+        bouncing={bouncing}
+        onClick={onClick}
+      />
     </div>
   );
 }
 
-// --- Main Board ---
+// ─── Main Board ───────────────────────────────────────────────────────────────
 
 export function KanbanBoard() {
-  const { orders, updateOrderStatus, currentUser, customers } = useStore();
+  const {
+    orders, customers, materials,
+    updateOrderStatus, currentUser, switchUser,
+  } = useStore();
+
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [overColumnId, setOverColumnId] = useState<string | null>(null);
+  const [justDroppedId, setJustDroppedId] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
-  // --- Filtering Logic ---
-  const filteredOrders = useMemo(() => {
+  // Simulate initial load (from localStorage via Zustand hydration)
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 400);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // ── Filtering ──────────────────────────────────────────────────────────────
+
+  const roleFilteredOrders = useMemo(() => {
     if (currentUser.role === 'client') {
-      return orders.filter(o => o.customerId === currentUser.id);
+      return orders.filter((o) => o.customerId === currentUser.id);
     }
     return orders;
   }, [orders, currentUser]);
 
+  const displayOrders = useMemo(() => {
+    if (!searchQuery.trim()) return roleFilteredOrders;
+    const q = searchQuery.toLowerCase();
+    return roleFilteredOrders.filter((o) => {
+      const cust = customers.find((c) => c.id === o.customerId);
+      return (
+        o.campaignName.toLowerCase().includes(q) ||
+        (cust?.name.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [roleFilteredOrders, searchQuery, customers]);
+
   const columnsData = useMemo(() => {
-    const data: Record<string, Order[]> = {};
-    COLUMNS.forEach(col => data[col.id] = []);
-    filteredOrders.forEach(order => {
-      // Handle legacy status mapping if needed, or mostly assume mock data is correct
-      if (data[order.status]) {
-        data[order.status].push(order);
-      } else {
-        // Fallback for unmatched status
-        if (!data['Solicitud']) data['Solicitud'] = [];
-        data['Solicitud'].push(order);
-      }
+    const data: Record<string, { orders: Order[]; sum: number }> = {};
+    COLUMNS.forEach((col) => { data[col.id] = { orders: [], sum: 0 }; });
+    displayOrders.forEach((order) => {
+      const col = data[order.status] ?? data['Solicitud'];
+      col.orders.push(order);
+      col.sum += order.totalAmount;
     });
     return data;
-  }, [filteredOrders]);
+  }, [displayOrders]);
 
-  // --- Drag Logic ---
+  const activePortfolio = useMemo(
+    () =>
+      roleFilteredOrders
+        .filter((o) => o.status !== 'Terminado')
+        .reduce((s, o) => s + o.totalAmount, 0),
+    [roleFilteredOrders]
+  );
+
+  // ── Drag ───────────────────────────────────────────────────────────────────
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } })
   );
 
-  const isDragEnabled = currentUser.role === 'admin' || currentUser.role === 'superadmin' || currentUser.role === 'operations';
+  const isDragEnabled =
+    currentUser.role === 'admin' ||
+    currentUser.role === 'superadmin' ||
+    currentUser.role === 'operations';
 
   const handleDragStart = (event: DragStartEvent) => {
     if (!isDragEnabled) return;
     setActiveId(event.active.id as string);
+    setJustDroppedId(null);
   };
 
   const handleDragOver = (event: DragOverEvent) => {
-    if (!isDragEnabled) return;
     const { active, over } = event;
-    if (!over) return;
-    
-    // Logic for Operations: restricted columns
+    if (!over) { setOverColumnId(null); return; }
+
+    const directColId = COLUMNS.find((c) => c.id === over.id)?.id ?? null;
+    const overOrderStatus = orders.find((o) => o.id === over.id)?.status ?? null;
+    setOverColumnId(directColId ?? overOrderStatus);
+
+    if (!isDragEnabled) return;
+
     if (currentUser.role === 'operations') {
       const allowedColumns = ['Por Aprobar', 'En Producción', 'Despacho', 'Terminado'];
-      const overStatus = (orders.find(o => o.id === over.id)?.status) || over.id as string;
-      const activeStatus = orders.find(o => o.id === active.id)?.status;
-      
-      // Prevent dragging INTO restricted columns (e.g. Solicitud) or FROM restricted columns
-      // For simplicity in this demo, strict block:
-      if (!allowedColumns.includes(overStatus) || (activeStatus && !allowedColumns.includes(activeStatus))) {
-         return; // Cancel or visual feedback? filtering 'over' prevents drop but not drag visual. 
-         // Real cancellation happens in DragEnd, but visual cues in DragOver
+      const overStatus = overOrderStatus ?? (over.id as string);
+      const activeStatus = orders.find((o) => o.id === active.id)?.status;
+      if (
+        !allowedColumns.includes(overStatus) ||
+        (activeStatus && !allowedColumns.includes(activeStatus))
+      ) {
+        return;
       }
     }
-
-    // Standard DragOver reordering logic
-    // ... implemented in DragEnd for simplicity with setOrders, 
-    // but specific column changing logic during drag can be complex.
-    // simpler method: just handle column change in DragEnd for robust state updates
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    if (!isDragEnabled) return;
+    setOverColumnId(null);
+    if (!isDragEnabled) { setActiveId(null); return; }
+
     const { active, over } = event;
     setActiveId(null);
     if (!over) return;
 
-    const activeOrder = orders.find(o => o.id === active.id);
+    const activeOrder = orders.find((o) => o.id === active.id);
     if (!activeOrder) return;
-    
-    const overId = over.id;
-    // Determine target column
-    let targetStatus = overId as Order['status'];
-    // If over an item, get that item's status
-    const overOrder = orders.find(o => o.id === overId);
-    if (overOrder) {
-      targetStatus = overOrder.status;
-    }
 
-    // Role Guards
+    let targetStatus = over.id as Order['status'];
+    const overOrder = orders.find((o) => o.id === over.id);
+    if (overOrder) targetStatus = overOrder.status;
+
     if (currentUser.role === 'client') return;
     if (currentUser.role === 'operations') {
-       const allowedOps = ['Por Aprobar', 'En Producción', 'Despacho', 'Terminado'];
-       if (!allowedOps.includes(targetStatus) || !allowedOps.includes(activeOrder.status)) return;
+      const allowed = ['Por Aprobar', 'En Producción', 'Despacho', 'Terminado'];
+      if (!allowed.includes(targetStatus) || !allowed.includes(activeOrder.status)) return;
     }
 
-    // Update Status if changed
     if (activeOrder.status !== targetStatus) {
       updateOrderStatus(activeOrder.id, targetStatus);
-    } 
-    // If same column, reorder (requires array move in store, for now we just sort by date/id in view mostly)
-    // For this prototype, we'll skip precise intra-column reordering in store to keep useStore simple
+      toast.success(`Orden movida a "${targetStatus}"`);
+      setJustDroppedId(activeOrder.id);
+      setTimeout(() => setJustDroppedId(null), 500);
+    }
   };
 
-  const activeOrder = orders.find(o => o.id === activeId);
+  const activeOrder = orders.find((o) => o.id === activeId);
 
-  // --- Modal Logic ---
-  const selectedOrder = orders.find(o => o.id === selectedOrderId);
+  // ── AI Modal open handler ─────────────────────────────────────────────────
+  const handleOpenAIModal = useCallback(() => setIsAIModalOpen(true), []);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col text-zinc-900 dark:text-zinc-100 font-sans">
-      
+    <div className="h-screen bg-zinc-50 flex flex-col text-zinc-900 font-sans">
+
       {/* Header */}
-      <header className="h-16 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-6 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 flex items-center justify-center font-bold">
-            V
+      <header className="h-auto border-b border-zinc-200 bg-white px-6 py-3 flex flex-col gap-2 shrink-0">
+        <div className="flex items-center justify-between">
+          {/* Brand */}
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 text-white flex items-center justify-center font-bold text-sm">
+              V
+            </div>
+            <span className="font-bold tracking-tight text-lg">VIU Manager</span>
           </div>
-          <span className="font-bold tracking-tight text-lg">Manager</span>
-          <span className="ml-2 px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-xs font-medium text-zinc-500 uppercase tracking-wide">
-            {currentUser.role} View
-          </span>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3">
+            {/* Search */}
+            <div className="relative hidden md:block">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar campaña o cliente..."
+                className="pl-8 pr-4 py-1.5 text-sm bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-300 focus-visible:ring-2 focus-visible:ring-zinc-900 w-56 transition-all focus:w-72 placeholder:text-zinc-400"
+              />
+            </div>
+
+            {/* AI Cotizador */}
+            {(currentUser.role === 'admin' || currentUser.role === 'superadmin') && (
+              <button
+                onClick={handleOpenAIModal}
+                className="px-4 py-1.5 bg-zinc-900 text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
+              >
+                <Sparkles size={14} />
+                <span className="hidden sm:inline">Nueva Cotización</span>
+              </button>
+            )}
+
+            {/* Config */}
+            {currentUser.role === 'superadmin' && (
+              <button
+                onClick={() => setIsConfigModalOpen(true)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 rounded-lg"
+              >
+                <Settings size={18} />
+              </button>
+            )}
+
+            {/* Role switcher */}
+            <div className="flex items-center gap-2">
+              <select
+                value={currentUser.role}
+                onChange={(e) => switchUser(e.target.value as UserRole)}
+                className="text-xs bg-zinc-100 border border-zinc-200 rounded-lg px-2 py-1.5 text-zinc-600 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 font-medium"
+              >
+                {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => (
+                  <option key={role} value={role}>
+                    {ROLE_LABELS[role]}
+                  </option>
+                ))}
+              </select>
+              <div className="w-7 h-7 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center text-xs font-bold text-zinc-600">
+                {currentUser.role[0].toUpperCase()}
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          {(currentUser.role === 'admin' || currentUser.role === 'superadmin') && (
-            <button 
-              onClick={() => setIsAIModalOpen(true)}
-              className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center gap-2 shadow-sm"
-            >
-              <Sparkles size={16} />
-              <span className="hidden sm:inline">Nueva Cotización IA</span>
-            </button>
+        {/* Sub-row: portfolio value + search results */}
+        <div className="flex items-center gap-4 text-xs text-zinc-400">
+          {activePortfolio > 0 && (
+            <span>
+              Cartera activa:{' '}
+              <span className="font-mono font-semibold text-zinc-600">
+                {formatCLP(activePortfolio)}
+              </span>
+            </span>
           )}
-          
-          {currentUser.role === 'superadmin' && (
-            <button 
-              onClick={() => setIsConfigModalOpen(true)}
-              className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
-            >
-              <Settings size={20} />
-            </button>
+          {searchQuery.trim() && (
+            <span className="text-zinc-500">
+              {displayOrders.length} resultado{displayOrders.length !== 1 ? 's' : ''} para{' '}
+              <span className="font-medium">"{searchQuery}"</span>
+            </span>
           )}
-
-          <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 flex items-center justify-center text-xs font-semibold">
-             {currentUser.role[0].toUpperCase()}
-          </div>
         </div>
       </header>
-      
+
       {/* Board */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
         <DndContext
@@ -290,50 +359,110 @@ export function KanbanBoard() {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex h-full gap-6 min-w-max">
-            {COLUMNS.map((col) => (
-              <div key={col.id} className="w-[320px] flex flex-col h-full rounded-2xl bg-zinc-100/50 dark:bg-zinc-900/50 border border-zinc-200/50 dark:border-zinc-800/50">
-                
-                {/* Column Header */}
-                <div className="p-4 flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-2.5">
-                    <div className={cn("p-1.5 rounded-md bg-white dark:bg-zinc-800 shadow-sm", col.color)}>
-                      <col.icon size={16} />
-                    </div>
-                    <span className="font-semibold text-sm tracking-wide text-zinc-700 dark:text-zinc-300 uppercase">
-                      {col.label}
-                    </span>
-                  </div>
-                  <span className="text-xs font-medium text-zinc-400 bg-white dark:bg-zinc-800 px-2 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-700">
-                    {columnsData[col.id].length}
-                  </span>
-                </div>
+          <div className="flex h-full gap-5 min-w-max">
+            {COLUMNS.map((col) => {
+              const colData = columnsData[col.id];
+              const isOver = overColumnId === col.id && activeId !== null;
+              const colOrders = colData.orders;
 
-                {/* Column Body */}
-                <div className="flex-1 overflow-y-auto px-3 pb-4">
-                  <SortableContext 
-                    items={columnsData[col.id].map(o => o.id)} 
-                    strategy={verticalListSortingStrategy}
-                    id={col.id}
-                  >
-                     <div className="space-y-3 min-h-[100px]">
-                      {columnsData[col.id].map((order) => (
-                        <SortableItem 
-                          key={order.id} 
-                          order={order} 
-                          onClick={() => setSelectedOrderId(order.id)}
-                          disabled={!isDragEnabled}
-                        />
-                      ))}
+              return (
+                <div
+                  key={col.id}
+                  id={col.id}
+                  className={cn(
+                    'w-[300px] flex flex-col h-full rounded-2xl bg-zinc-100/60 border-2 transition-all duration-150',
+                    isOver
+                      ? COLUMN_OVER_BORDER[col.id]
+                      : 'border-transparent'
+                  )}
+                >
+                  {/* Column header */}
+                  <div className="px-4 pt-4 pb-3 flex items-center justify-between shrink-0">
+                    <div className="flex items-center gap-2">
+                      <div className={cn('p-1.5 rounded-lg bg-white shadow-sm', col.color)}>
+                        <col.icon size={14} />
+                      </div>
+                      <span className="font-semibold text-xs tracking-widest text-zinc-600 uppercase">
+                        {col.label}
+                      </span>
                     </div>
-                  </SortableContext>
+                    <div className="text-right">
+                      <div className="text-xs font-medium text-zinc-500 bg-white border border-zinc-200 px-2 py-1 rounded-lg leading-none">
+                        {colOrders.length} órd.
+                        {colData.sum > 0 && (
+                          <span className="ml-1 text-zinc-400 font-normal">· {formatCLP(colData.sum)}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Column body */}
+                  <div className="flex-1 overflow-y-auto px-3 pb-4">
+                    <SortableContext
+                      items={colOrders.map((o) => o.id)}
+                      strategy={verticalListSortingStrategy}
+                      id={col.id}
+                    >
+                      {isLoading ? (
+                        /* ── Skeleton loading state ── */
+                        <div className="space-y-2.5 min-h-[100px]">
+                          {[1, 2, 3].map((k) => (
+                            <SkeletonCard key={k} />
+                          ))}
+                        </div>
+                      ) : colOrders.length === 0 ? (
+                        /* ── Empty state ── */
+                        <div className="flex flex-col items-center justify-center h-full min-h-[120px] gap-2">
+                          <col.icon size={32} className="text-zinc-300" />
+                          <p className="text-xs font-medium text-zinc-400">Sin órdenes</p>
+                          {col.id === 'Solicitud' && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && (
+                            <button
+                              onClick={handleOpenAIModal}
+                              className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-700 transition-colors mt-1 font-medium"
+                            >
+                              <Plus size={12} />
+                              Nueva solicitud
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5 min-h-[100px]">
+                          {colOrders.map((order) => (
+                            <SortableItem
+                              key={order.id}
+                              order={order}
+                              onClick={() => setSelectedOrderId(order.id)}
+                              disabled={!isDragEnabled}
+                              bouncing={order.id === justDroppedId}
+                              customers={customers}
+                              materials={materials}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </SortableContext>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
+          {/* Drag overlay */}
           <DragOverlay dropAnimation={dropAnimation}>
-            {activeOrder ? <OrderCard order={activeOrder} isOverlay /> : null}
+            {activeOrder ? (
+              <motion.div
+                initial={{ scale: 1, rotate: 0 }}
+                animate={{ scale: 1.04, rotate: 1.5 }}
+                transition={{ duration: 0.12 }}
+                className="shadow-2xl"
+              >
+                <OrderCard
+                  order={activeOrder}
+                  customer={customers.find((c) => c.id === activeOrder.customerId)}
+                  materials={materials}
+                />
+              </motion.div>
+            ) : null}
           </DragOverlay>
         </DndContext>
       </div>
@@ -341,70 +470,7 @@ export function KanbanBoard() {
       {/* Modals */}
       <AICotizadorModal isOpen={isAIModalOpen} onClose={() => setIsAIModalOpen(false)} />
       <PricingConfigModal isOpen={isConfigModalOpen} onClose={() => setIsConfigModalOpen(false)} />
-      
-      {/* Simple Details Modal for this Refactor */}
-      {selectedOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 backdrop-blur-sm p-4" onClick={() => setSelectedOrderId(null)}>
-           <div className="bg-white dark:bg-zinc-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden p-6" onClick={e => e.stopPropagation()}>
-              <div className="flex justify-between items-start mb-6">
-                 <div>
-                    <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{selectedOrder.campaignName}</h2>
-                    <p className="text-zinc-500 text-sm mt-1">ID: {selectedOrder.id}</p>
-                 </div>
-                 <button onClick={() => setSelectedOrderId(null)} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full">
-                    <Settings size={20} className="text-zinc-400" />
-                 </button>
-              </div>
-              
-              <div className="space-y-6">
-                 <div>
-                    <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Descripción</h4>
-                    <p className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed bg-zinc-50 dark:bg-zinc-800/50 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                       {selectedOrder.description || "Sin descripción detallada."}
-                    </p>
-                 </div>
-
-                 <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Cliente</h4>
-                        <p className="font-medium text-zinc-900 dark:text-white">
-                           {customers.find(c => c.id === selectedOrder.customerId)?.name}
-                        </p>
-                    </div>
-                    <div>
-                        <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Total</h4>
-                        <p className="font-mono font-medium text-zinc-900 dark:text-white">
-                           {new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(selectedOrder.totalAmount)}
-                        </p>
-                    </div>
-                 </div>
-
-                 {/* Operations Checklist Simulation */}
-                 {currentUser.role === 'operations' && (
-                    <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                       <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">Checklist de Operaciones</h4>
-                       <div className="space-y-2">
-                          <label className="flex items-center gap-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800">
-                             <input type="checkbox" className="w-4 h-4 rounded text-zinc-900 focus:ring-zinc-900" />
-                             <span className="text-sm text-zinc-700 dark:text-zinc-300">Material Reservado</span>
-                          </label>
-                          <label className="flex items-center gap-3 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800">
-                             <input type="checkbox" className="w-4 h-4 rounded text-zinc-900 focus:ring-zinc-900" />
-                             <span className="text-sm text-zinc-700 dark:text-zinc-300">Archivos Revisados</span>
-                          </label>
-                       </div>
-                    </div>
-                 )}
-              </div>
-              
-              <div className="mt-8 flex justify-end">
-                 <button onClick={() => setSelectedOrderId(null)} className="px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-lg text-sm font-medium hover:bg-zinc-200 transition-colors">
-                    Cerrar
-                 </button>
-              </div>
-           </div>
-        </div>
-      )}
+      <OrderDetailModal orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} />
     </div>
   );
 }

@@ -19,10 +19,15 @@ interface AppState {
   switchUser: (role: UserRole, userId?: string) => void;
   updatePricingConfig: (config: Partial<PricingConfig>) => void;
   
+  // Material Actions
+  updateMaterials: (materials: Material[]) => void;
+
   // Order Actions
   addOrder: (order: Order) => void;
   updateOrderStatus: (orderId: string, status: Order['status']) => void;
   updateFileStatus: (orderId: string, status: Order['fileStatus']) => void;
+  updateOrderItemPrice: (orderId: string, itemIndex: number, unitPrice: number) => void;
+  updateOperationsChecklist: (orderId: string, checklist: boolean[]) => void;
   
   // Reset
   resetStore: () => void;
@@ -49,6 +54,8 @@ export const useStore = create<AppState>()(
         pricingConfig: { ...state.pricingConfig, ...config }
       })),
 
+      updateMaterials: (materials) => set({ materials }),
+
       addOrder: (order) => set((state) => ({ 
         orders: [...state.orders, order] 
       })),
@@ -61,6 +68,26 @@ export const useStore = create<AppState>()(
         orders: state.orders.map((o) => (o.id === orderId ? { ...o, fileStatus: status } : o)),
       })),
 
+      updateOrderItemPrice: (orderId, itemIndex, unitPrice) =>
+        set((state) => ({
+          orders: state.orders.map((order) => {
+            if (order.id !== orderId) return order;
+            const items = order.items.map((item, idx) =>
+              idx !== itemIndex ? item : { ...item, unitPrice, subtotal: unitPrice * item.quantity }
+            );
+            const totalAmount =
+              items.reduce((s, i) => s + i.subtotal, 0) + state.pricingConfig.despachoCost;
+            return { ...order, items, totalAmount };
+          }),
+        })),
+
+      updateOperationsChecklist: (orderId, checklist) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id !== orderId ? o : { ...o, operationsChecklist: checklist }
+          ),
+        })),
+
       resetStore: () => set({
         currentUser: { role: 'admin', id: 'admin1' },
         orders: initialOrders,
@@ -71,9 +98,9 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'viu-manager-storage',
-      version: 2, // Increment version to invalidate old state
+      version: 3, // Bump version to 3
       migrate: (persistedState: unknown, version: number) => {
-        if (version < 2) {
+        if (version < 3) {
           // If version is old, reset to default state
           return {
             currentUser: { role: 'admin', id: 'admin1' },

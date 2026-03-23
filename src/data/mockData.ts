@@ -8,51 +8,99 @@ export interface Customer {
 
 export interface Material {
   id: string;
-  name: string; // Spanish for UI consistency
+  name: string;
   type: "Rígido" | "Flexible";
   stock: number;
-  unit: string;
-  pricePerUnit: number;
+  unit: string; // "planchas" for rigid, "m" for flexible
+  pricePerUnit: number; // CLP per plancha (rigid) or CLP per m² (flexible)
+  sheetWidth?: number; // cm — only for rigid, default 122
+  sheetHeight?: number; // cm — only for rigid, default 244
+  minPrice?: number; // minimum CLP per piece (floor price)
 }
 
 export interface OrderItem {
   materialId: string;
-  width: number;
-  height: number;
+  width: number;         // cm
+  height: number;        // cm
   quantity: number;
   finishing: string[];
+  doubleSided: boolean;
+  // Calculated fields (set by quoteEngine, editable by admin):
+  suggestedUnitPrice: number;
+  unitPrice: number;
+  subtotal: number;
+  calculationBreakdown: {
+    baseCost: number;
+    finishingMultiplier: number;
+    finishingAddons: number;
+    planchasUsed?: number;
+  };
 }
 
 export interface Order {
   id: string;
   customerId: string;
-  campaignName: string; // English
-  description: string; // English (simulating raw input)
+  campaignName: string;
+  description: string;
   status:
     | "Solicitud"
     | "Por Aprobar"
     | "En Producción"
     | "Despacho"
-    | "Terminado"; // Spanish Columns
+    | "Terminado";
   items: OrderItem[];
   totalAmount: number;
   deliveryDate: string;
   createdAt: string;
-  fileStatus: "Rojo" | "Amarillo" | "Verde"; // File readiness
+  fileStatus: "Rojo" | "Amarillo" | "Verde";
+  operationsChecklist?: boolean[]; // 5-item checklist, persisted
+  aiGenerated?: boolean;
 }
 
 export interface PricingConfig {
-  foamPrice: number;
-  vinylPrice: number;
-  laborCostPerHour: number;
-  margin: number;
+  // Rigid material calculation
+  rigidMargin: number; // markup on top of raw plancha cost, e.g. 0.4 = 40%
+  // Finishing multipliers (applied to base unit price)
+  finishingMultipliers: {
+    "Corte Recto": number; // 1.0 (baseline)
+    Troquelado: number; // 1.5
+    "Corte CNC": number; // 1.8
+    "Tiro y Retiro": number; // 2.0
+    "Corte Contorno": number; // 1.6
+    [key: string]: number;
+  };
+  // Per-unit finishing add-ons (CLP added per piece)
+  finishingAddons: {
+    Ojetillos: number; // 800 CLP per unit
+    "Pie de Apoyo": number; // 2500 CLP per unit
+    "Bolsillo Superior": number; // 1500 CLP per unit
+    Refuerzo: number; // 1000 CLP per unit
+    [key: string]: number;
+  };
+  // Order-level fees
+  despachoCost: number; // flat fee per order, e.g. 15000
+  instalacionDefault: number; // default suggestion, e.g. 50000
 }
 
 export const initialPricingConfig: PricingConfig = {
-  foamPrice: 15000,
-  vinylPrice: 5000,
-  laborCostPerHour: 25000,
-  margin: 0.35,
+  rigidMargin: 0.4,
+  finishingMultipliers: {
+    "Corte Recto": 1.0,
+    Troquelado: 1.5,
+    "Corte CNC": 1.8,
+    "Tiro y Retiro": 2.0,
+    "Corte Contorno": 1.6,
+    "Pegado Capas": 1.3,
+  },
+  finishingAddons: {
+    Ojetillos: 800,
+    "Pie de Apoyo": 2500,
+    "Bolsillo Superior": 1500,
+    Refuerzo: 1000,
+    Instalación: 0,
+  },
+  despachoCost: 15000,
+  instalacionDefault: 50000,
 };
 
 export const customers: Customer[] = [
@@ -101,14 +149,20 @@ export const materials: Material[] = [
     stock: 120,
     unit: "planchas",
     pricePerUnit: 15000,
+    sheetWidth: 122,
+    sheetHeight: 244,
+    minPrice: 1500,
   },
   {
     id: "m2",
-    name: "Sintra 3MM (PVC)",
+    name: "Sintra 3MM (Trovicel)",
     type: "Rígido",
     stock: 85,
     unit: "planchas",
     pricePerUnit: 12000,
+    sheetWidth: 122,
+    sheetHeight: 244,
+    minPrice: 1500,
   },
   {
     id: "m3",
@@ -117,6 +171,9 @@ export const materials: Material[] = [
     stock: 40,
     unit: "planchas",
     pricePerUnit: 18000,
+    sheetWidth: 122,
+    sheetHeight: 244,
+    minPrice: 2000,
   },
   {
     id: "m4",
@@ -125,30 +182,49 @@ export const materials: Material[] = [
     stock: 200,
     unit: "planchas",
     pricePerUnit: 8000,
+    sheetWidth: 122,
+    sheetHeight: 244,
+    minPrice: 1200,
   },
   {
     id: "m5",
-    name: "Adhesivo Laminado",
+    name: "Adhesivo Laminado Matte",
     type: "Flexible",
     stock: 500,
     unit: "m",
-    pricePerUnit: 4500,
+    pricePerUnit: 9000,
   },
   {
     id: "m6",
+    name: "Adhesivo Black Out Matte",
+    type: "Flexible",
+    stock: 300,
+    unit: "m",
+    pricePerUnit: 7770,
+  },
+  {
+    id: "m7",
     name: "Vinilo Blanco Plotter",
     type: "Flexible",
     stock: 300,
     unit: "m",
-    pricePerUnit: 3800,
+    pricePerUnit: 10500,
   },
   {
-    id: "m7",
+    id: "m8",
     name: "Tela PVC",
     type: "Flexible",
     stock: 150,
     unit: "m",
-    pricePerUnit: 6000,
+    pricePerUnit: 6800,
+  },
+  {
+    id: "m9",
+    name: "Floorgraphic Laminado Piso",
+    type: "Flexible",
+    stock: 100,
+    unit: "m",
+    pricePerUnit: 11500,
   },
 ];
 
@@ -167,6 +243,11 @@ export const initialOrders: Order[] = [
         height: 240,
         quantity: 50,
         finishing: ["Corte Recto"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 },
       },
     ],
     totalAmount: 2500000,
@@ -188,6 +269,11 @@ export const initialOrders: Order[] = [
         height: 50,
         quantity: 200,
         finishing: ["Troquelado"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1.5, finishingAddons: 0 },
       },
     ],
     totalAmount: 850000,
@@ -203,7 +289,7 @@ export const initialOrders: Order[] = [
       "Directional signs for the upcoming tech conference. Requires rigid PVC.",
     status: "Terminado",
     items: [
-      { materialId: "m2", width: 60, height: 90, quantity: 10, finishing: [] },
+      { materialId: "m2", width: 60, height: 90, quantity: 10, finishing: [], doubleSided: false, suggestedUnitPrice: 0, unitPrice: 0, subtotal: 0, calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 } },
     ],
     totalAmount: 120000,
     deliveryDate: "2026-01-15",
@@ -236,6 +322,11 @@ export const initialOrders: Order[] = [
         height: 100,
         quantity: 5,
         finishing: ["Ojetillos", "Refuerzo"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 1800 },
       },
     ],
     totalAmount: 450000,
@@ -256,6 +347,11 @@ export const initialOrders: Order[] = [
         height: 100,
         quantity: 20,
         finishing: ["Corte CNC"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1.8, finishingAddons: 0 },
       },
     ],
     totalAmount: 980000,
@@ -276,6 +372,11 @@ export const initialOrders: Order[] = [
         height: 200,
         quantity: 15,
         finishing: ["Pie de Apoyo"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 2500 },
       },
     ],
     totalAmount: 0,
@@ -296,6 +397,11 @@ export const initialOrders: Order[] = [
         height: 60,
         quantity: 1,
         finishing: ["Corte Contorno"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1.6, finishingAddons: 0 },
       },
     ],
     totalAmount: 150000,
@@ -316,6 +422,11 @@ export const initialOrders: Order[] = [
         height: 200,
         quantity: 2,
         finishing: ["Pegado Capas", "Pintura"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1.3, finishingAddons: 0 },
       },
     ],
     totalAmount: 1200000,
@@ -336,6 +447,11 @@ export const initialOrders: Order[] = [
         height: 250,
         quantity: 1,
         finishing: ["Bolsillo Superior"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 1500 },
       },
     ],
     totalAmount: 350000,
@@ -350,7 +466,7 @@ export const initialOrders: Order[] = [
     description: "Booth materials for the annual education fair.",
     status: "Despacho",
     items: [
-      { materialId: "m4", width: 90, height: 210, quantity: 10, finishing: [] },
+      { materialId: "m4", width: 90, height: 210, quantity: 10, finishing: [], doubleSided: false, suggestedUnitPrice: 0, unitPrice: 0, subtotal: 0, calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 } },
     ],
     totalAmount: 600000,
     deliveryDate: "2026-02-14",
@@ -364,7 +480,7 @@ export const initialOrders: Order[] = [
     description: "Simple red and white clearance signs.",
     status: "Por Aprobar",
     items: [
-      { materialId: "m4", width: 50, height: 70, quantity: 100, finishing: [] },
+      { materialId: "m4", width: 50, height: 70, quantity: 100, finishing: [], doubleSided: false, suggestedUnitPrice: 0, unitPrice: 0, subtotal: 0, calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 } },
     ],
     totalAmount: 500000,
     deliveryDate: "2026-02-28",
@@ -378,7 +494,7 @@ export const initialOrders: Order[] = [
     description: "Material testing for next season.",
     status: "Terminado",
     items: [
-      { materialId: "m1", width: 30, height: 30, quantity: 5, finishing: [] },
+      { materialId: "m1", width: 30, height: 30, quantity: 5, finishing: [], doubleSided: false, suggestedUnitPrice: 0, unitPrice: 0, subtotal: 0, calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 } },
     ],
     totalAmount: 50000,
     deliveryDate: "2026-01-05",
@@ -398,6 +514,11 @@ export const initialOrders: Order[] = [
         height: 150,
         quantity: 1,
         finishing: ["Instalación"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 },
       },
     ],
     totalAmount: 0,
@@ -418,6 +539,11 @@ export const initialOrders: Order[] = [
         height: 240,
         quantity: 8,
         finishing: ["Corte Router"],
+        doubleSided: false,
+        suggestedUnitPrice: 0,
+        unitPrice: 0,
+        subtotal: 0,
+        calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 },
       },
     ],
     totalAmount: 1800000,

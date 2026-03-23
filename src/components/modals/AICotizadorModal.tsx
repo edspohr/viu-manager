@@ -1,330 +1,657 @@
-
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { useStore } from '../../store/useStore';
-import { X, Upload, Sparkles, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { formatCLP } from '../../lib/formatters';
+import {
+  X, Upload, Sparkles, ArrowRight, ArrowLeft, Loader2,
+  AlertCircle, Trash2, Plus, Info, CheckCircle,
+} from 'lucide-react';
+import { extractOrderItems } from '../../lib/geminiService';
+import { calculateItemPrice, calculateOrderQuote } from '../../lib/quoteEngine';
+import type { ExtractedItem } from '../../lib/geminiService';
+import type { OrderItem } from '../../data/mockData';
+import { SkeletonTableRow } from '../ui/Skeleton';
 
 interface AICotizadorModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-// Initialize Gemini
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(API_KEY || '');
-
-interface AnalysisResult {
-  campaignName: string;
+interface ReviewItem extends OrderItem {
   description: string;
-  materialName: string;
-  width: number;
-  height: number;
-  quantity: number;
-  estimatedCost: number;
+  confidence: number;
+  isOverridden: boolean;
+  warning?: string;
+}
+
+type StepType = 'input' | 'processing' | 'review' | 'success';
+
+const STEP_LABELS: Record<StepType, string> = {
+  input: 'Entrada',
+  processing: 'Procesando',
+  review: 'Revisar',
+  success: 'Listo',
+};
+const STEP_ORDER: StepType[] = ['input', 'processing', 'review', 'success'];
+
+function mapExtractedToOrderItem(e: ExtractedItem): OrderItem {
+  return {
+    materialId: e.materialId,
+    width: e.width,
+    height: e.height,
+    quantity: e.quantity <= 0 ? 1 : e.quantity,
+    finishing: e.finishing,
+    doubleSided: e.doubleSided,
+    suggestedUnitPrice: 0,
+    unitPrice: 0,
+    subtotal: 0,
+    calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 },
+  };
 }
 
 export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => {
-  const { addOrder } = useStore();
-  const [step, setStep] = useState<'input' | 'processing' | 'result'>('input');
+  const { addOrder, customers, materials, pricingConfig } = useStore();
+
+  const [step, setStep] = useState<StepType>('input');
   const [emailText, setEmailText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [processingLabel, setProcessingLabel] = useState('Extrayendo ítems...');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+
+  // Review step state
+  const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
+  const [campaignName, setCampaignName] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState('');
+  const [fileStatus, setFileStatus] = useState<'Rojo' | 'Amarillo' | 'Verde'>('Amarillo');
+  const [requiresInstallation, setRequiresInstallation] = useState(false);
+
+  // Success
+  const [createdCampaignName, setCreatedCampaignName] = useState('');
+
+  // ── Close on Escape key ────────────────────────────────────────────────────
+  const handleEsc = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape') onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, handleEsc]);
 
   if (!isOpen) return null;
 
+  // --- File handling ---
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
-    }
+    if (e.target.files) setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
   };
-
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    if (e.dataTransfer.files) {
-      setFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]);
-    }
+    if (e.dataTransfer.files) setFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]);
   };
+  const removeFile = (i: number) => setFiles(prev => prev.filter((_, idx) => idx !== i));
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const removeFile = (index: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const fileToGenerativePart = async (file: File) => {
-    const base64EncodedDataPromise = new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-      reader.readAsDataURL(file);
-    });
-    return {
-      inlineData: {
-        data: await base64EncodedDataPromise,
-        mimeType: file.type,
-      },
-    };
-  };
-
+  // --- Analysis ---
   const handleAnalyze = async () => {
+    if (!selectedCustomerId) { setError('Selecciona un cliente antes de analizar.'); return; }
     if (!emailText.trim() && files.length === 0) return;
-    setStep('processing');
     setError(null);
-    
+    setStep('processing');
+    setProcessingLabel('Extrayendo ítems...');
+
     try {
-      if (!API_KEY) {
-        throw new Error("API Key not found. Check .env file.");
-      }
+      const result = await extractOrderItems(emailText, files, materials);
+      setProcessingLabel('Calculando precios...');
+      await new Promise(r => setTimeout(r, 400));
 
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-      
-      const prompt = `
-        Act as an expert estimator for a large format printing company.
-        Analyze the following customer request text and attached images (if any) to extract the technical requirements.
-        
-        Request Text: "${emailText}"
-        
-        Return ONLY a raw JSON object (no markdown formatting, no code blocks) with the following structure:
-        {
-          "campaignName": "Short catchy name for the campaign",
-          "description": "Brief summary of the request",
-          "materialName": "Suggested material (e.g. Foam, Vinyl, Banner, PVC)",
-          "width": Number (width in cm, default to 0 if unknown),
-          "height": Number (height in cm, default to 0 if unknown),
-          "quantity": Number (default to 1),
-          "estimatedCost": Number (Estimate in CLP, e.g. 50000)
-        }
-      `;
+      const orderItems = result.items.map(mapExtractedToOrderItem);
+      const quote = calculateOrderQuote(orderItems, materials, pricingConfig);
 
-      const imageParts = await Promise.all(
-        files.map(fileToGenerativePart)
-      );
+      const mapped: ReviewItem[] = quote.calculatedItems.map((calcItem, idx) => ({
+        ...calcItem,
+        description: result.items[idx]?.description ?? `Ítem ${idx + 1}`,
+        confidence: result.items[idx]?.confidence ?? 1,
+        isOverridden: false,
+      }));
 
-      const result = await model.generateContent([prompt, ...imageParts]);
-      const response = await result.response;
-      const text = response.text();
-      
-      // Clean up markdown code blocks if present
-      const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-      const data = JSON.parse(cleanJson);
-      
-      setAnalysisResult(data);
-      setStep('result');
+      setCampaignName(result.campaignName);
+      setRequiresInstallation(result.requiresInstallation);
+      setReviewItems(mapped);
+      setDeliveryDate(new Date(Date.now() + 7 * 86400_000).toISOString().split('T')[0]);
+      setStep('review');
     } catch (err: unknown) {
-      console.error("AI Error:", err);
-      const errorMessage = err instanceof Error ? err.message : "Failed to analyze request.";
-      setError(errorMessage);
+      const msg = err instanceof Error ? err.message : 'Error al analizar la solicitud.';
+      setError(msg);
+      toast.error(msg);
       setStep('input');
     }
   };
+
+  // --- Review table editing ---
+  const handlePriceOverride = (idx: number, price: number) => {
+    setReviewItems(prev => prev.map((item, i) =>
+      i !== idx ? item : { ...item, unitPrice: price, subtotal: price * item.quantity, isOverridden: true }
+    ));
+  };
+
+  const handleDimensionChange = (idx: number, field: 'width' | 'height' | 'quantity', value: number) => {
+    setReviewItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      const updated = { ...item, [field]: value };
+      const material = materials.find(m => m.id === updated.materialId);
+      if (!material) return updated;
+      const recalc = calculateItemPrice(updated, material, pricingConfig);
+      return {
+        ...recalc,
+        description: item.description,
+        confidence: item.confidence,
+        isOverridden: item.isOverridden,
+      };
+    }));
+  };
+
+  const handleDescriptionChange = (idx: number, value: string) => {
+    setReviewItems(prev => prev.map((item, i) => i !== idx ? item : { ...item, description: value }));
+  };
+
+  const handleDeleteItem = (idx: number) => {
+    setReviewItems(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleAddItem = () => {
+    const firstMaterial = materials[0];
+    const blank: ReviewItem = {
+      materialId: firstMaterial?.id ?? 'm1',
+      width: 0,
+      height: 0,
+      quantity: 1,
+      finishing: [],
+      doubleSided: false,
+      suggestedUnitPrice: 0,
+      unitPrice: 0,
+      subtotal: 0,
+      calculationBreakdown: { baseCost: 0, finishingMultiplier: 1, finishingAddons: 0 },
+      description: 'Nuevo ítem',
+      confidence: 1,
+      isOverridden: false,
+    };
+    setReviewItems(prev => [...prev, blank]);
+  };
+
+  // --- Create order ---
+  const subtotal = reviewItems.reduce((s, i) => s + i.subtotal, 0);
+  const total = subtotal + pricingConfig.despachoCost;
+  const hasInvalidItems = reviewItems.some(i => i.width === 0 || i.height === 0);
 
   const handleCreateOrder = () => {
-    if (!analysisResult) return;
-
-    const newOrder = {
-      id: `o${Date.now()}`,
-      customerId: 'c1', // Defaulting to one customer for demo
-      campaignName: analysisResult.campaignName,
-      description: analysisResult.description,
-      status: 'Por Aprobar' as const,
-      items: [
-        { 
-          materialId: 'm1', // Defaulting for demo, ideally match based on Name
-          width: analysisResult.width, 
-          height: analysisResult.height, 
-          quantity: analysisResult.quantity, 
-          finishing: ['Corte Recto'] 
-        }
-      ],
-      totalAmount: analysisResult.estimatedCost,
-      deliveryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    const orderItems: OrderItem[] = reviewItems.map((item) => ({
+      materialId: item.materialId,
+      width: item.width,
+      height: item.height,
+      quantity: item.quantity,
+      finishing: item.finishing,
+      doubleSided: item.doubleSided,
+      suggestedUnitPrice: item.suggestedUnitPrice,
+      unitPrice: item.unitPrice,
+      subtotal: item.subtotal,
+      calculationBreakdown: item.calculationBreakdown,
+    }));
+    const orderId = `o${crypto.randomUUID().slice(0, 8)}`;
+    addOrder({
+      id: orderId,
+      customerId: selectedCustomerId,
+      campaignName,
+      description: emailText.slice(0, 200),
+      status: 'Por Aprobar',
+      items: orderItems,
+      totalAmount: total,
+      deliveryDate,
       createdAt: new Date().toISOString().split('T')[0],
-      fileStatus: 'Amarillo' as const,
-    };
-
-    addOrder(newOrder);
-    onClose();
-    // Reset for next time
+      fileStatus,
+      aiGenerated: true,
+    });
+    toast.success(`Orden creada: ${campaignName}`);
+    setCreatedCampaignName(campaignName);
+    setStep('success');
     setTimeout(() => {
-      setStep('input');
-      setEmailText('');
-      setFiles([]);
-      setAnalysisResult(null);
-    }, 500);
+      handleReset();
+      onClose();
+    }, 2000);
   };
 
+  const handleReset = () => {
+    setStep('input');
+    setEmailText('');
+    setFiles([]);
+    setError(null);
+    setSelectedCustomerId('');
+    setReviewItems([]);
+    setCampaignName('');
+    setDeliveryDate('');
+    setFileStatus('Amarillo');
+    setRequiresInstallation(false);
+  };
+
+  const currentStepIdx = STEP_ORDER.indexOf(step);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 backdrop-blur-sm p-4">
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col h-[600px]">
-        
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 backdrop-blur-sm p-4">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+
         {/* Header */}
-        <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-900/50">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-zinc-900 text-white flex items-center justify-center">
-              <Sparkles size={16} />
+        <div className="px-6 pt-5 pb-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 flex items-center justify-center">
+              <Sparkles size={15} />
             </div>
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-white tracking-tight">AI Cotizador (Gemini 2.5)</h2>
+            <h2 className="text-base font-semibold text-zinc-900 dark:text-white tracking-tight">
+              AI Cotizador — Gemini 2.5
+            </h2>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
-            <X size={20} className="text-zinc-500" />
+
+          {/* Step indicator */}
+          <div className="flex items-center gap-1">
+            {STEP_ORDER.map((s, idx) => (
+              <div key={s} className="flex items-center gap-1">
+                <span className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                  idx === currentStepIdx
+                    ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900'
+                    : idx < currentStepIdx
+                    ? 'text-zinc-400 dark:text-zinc-500'
+                    : 'text-zinc-300 dark:text-zinc-700'
+                }`}>
+                  {idx < currentStepIdx ? '✓ ' : ''}{STEP_LABELS[s]}
+                </span>
+                {idx < STEP_ORDER.length - 1 && (
+                  <span className="text-zinc-300 dark:text-zinc-700 text-xs">›</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <button onClick={onClose} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900">
+            <X size={18} className="text-zinc-500" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-8 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
+
+          {/* ERROR BANNER */}
           {error && (
-            <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-xl flex items-center gap-2 text-sm">
-              <AlertCircle size={16} />
-              {error}
+            <div className="mx-6 mt-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl flex items-center gap-2 text-sm border border-red-200 dark:border-red-800/50">
+              <AlertCircle size={15} className="shrink-0" /> {error}
             </div>
           )}
 
+          {/* ── STEP: INPUT ── */}
           {step === 'input' && (
-            <div className="grid grid-cols-2 gap-8 h-full">
-              {/* Left: Text Input */}
-              <div className="flex flex-col h-full">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Pegar Correo / Solicitud</label>
-                <textarea
-                  className="flex-1 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl p-4 resize-none focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-600 transition-all text-sm leading-relaxed"
-                  placeholder="Ej: Necesito 50 carteles de 120x240 en Foam para la campaña de verano..."
-                  value={emailText}
-                  onChange={(e) => setEmailText(e.target.value)}
-                />
-              </div>
-
-              {/* Right: Dropzone */}
-              <div className="flex flex-col h-full">
-                <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Archivos Adjuntos (PDF / Imágenes)</label>
-                <div 
-                  className="flex-1 border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl flex flex-col items-center justify-center bg-zinc-50/50 dark:bg-zinc-800/20 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer group relative"
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
+            <div className="p-6 space-y-5">
+              {/* Customer selector */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5 block">
+                  Cliente <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedCustomerId}
+                  onChange={e => { setSelectedCustomerId(e.target.value); setError(null); }}
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-400 focus-visible:ring-2 focus-visible:ring-zinc-900 transition-all text-zinc-900 dark:text-white"
                 >
-                  <input 
-                    type="file" 
-                    multiple 
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    onChange={handleFileChange}
-                    accept="image/*,application/pdf"
+                  <option value="">Seleccionar cliente...</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                {/* Left: text */}
+                <div className="flex flex-col min-h-60">
+                  <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+                    Solicitud / Correo
+                  </label>
+                  <textarea
+                    className="flex-1 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl p-4 resize-none focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-400 focus-visible:ring-2 focus-visible:ring-zinc-900 transition-all text-sm leading-relaxed text-zinc-900 dark:text-white placeholder:text-zinc-400"
+                    placeholder="Ej: Necesito 50 carteles de 120x240 cm en Foam para la campaña de verano..."
+                    value={emailText}
+                    onChange={e => setEmailText(e.target.value)}
                   />
-                  
-                  {files.length === 0 ? (
-                    <>
-                      <div className="w-16 h-16 bg-white dark:bg-zinc-800 rounded-full shadow-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-200">
-                        <Upload className="text-zinc-400" size={24} />
+                </div>
+
+                {/* Right: dropzone */}
+                <div className="flex flex-col min-h-60">
+                  <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+                    Archivos Adjuntos (PDF / Imágenes)
+                  </label>
+                  <div
+                    className="flex-1 border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl flex flex-col items-center justify-center bg-zinc-50/50 dark:bg-zinc-800/20 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group relative"
+                    onDrop={handleDrop}
+                    onDragOver={e => e.preventDefault()}
+                  >
+                    <input type="file" multiple className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleFileChange} accept="image/*,application/pdf" />
+                    {files.length === 0 ? (
+                      <>
+                        <div className="w-12 h-12 bg-white dark:bg-zinc-800 rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                          <Upload className="text-zinc-400" size={20} />
+                        </div>
+                        <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium">Arrastra archivos aquí</p>
+                        <p className="text-zinc-400 dark:text-zinc-600 text-xs mt-1">PDF, JPG, PNG</p>
+                      </>
+                    ) : (
+                      <div className="w-full h-full p-4 overflow-y-auto">
+                        <p className="text-center text-zinc-400 text-xs mb-3">{files.length} archivo(s)</p>
+                        <div className="space-y-1.5">
+                          {files.map((f, i) => (
+                            <div key={i} className="flex items-center justify-between p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 text-xs">
+                              <span className="truncate max-w-[180px] text-zinc-700 dark:text-zinc-300">{f.name}</span>
+                              <button onClick={e => { e.stopPropagation(); e.preventDefault(); removeFile(i); }} className="text-zinc-400 hover:text-red-500 ml-2">
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-center text-xs text-zinc-400 mt-3">Clic para agregar más</p>
                       </div>
-                      <p className="text-zinc-600 dark:text-zinc-400 font-medium">Arrastra archivos aquí</p>
-                      <p className="text-zinc-400 dark:text-zinc-500 text-xs mt-1">Support: PDF, JPG, PNG</p>
-                    </>
-                  ) : (
-                    <div className="w-full h-full p-4 overflow-y-auto">
-                      <p className="text-center text-zinc-500 mb-2">{files.length} archivo(s) seleccionado(s)</p>
-                      <div className="space-y-2">
-                        {files.map((f, i) => (
-                           <div key={i} className="flex items-center justify-between p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm">
-                             <span className="truncate max-w-[200px] text-zinc-700 dark:text-zinc-300">{f.name}</span>
-                             <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                removeFile(i);
-                              }}
-                              className="text-zinc-400 hover:text-red-500"
-                             >
-                                <X size={14} />
-                             </button>
-                           </div>
-                        ))}
-                      </div>
-                      <p className="text-center text-xs text-zinc-400 mt-4">Click o arrastrar para agregar más</p>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
+          {/* ── STEP: PROCESSING ── */}
           {step === 'processing' && (
-            <div className="h-full flex flex-col items-center justify-center">
-              <div className="relative">
-                <div className="absolute inset-0 bg-zinc-200 dark:bg-zinc-800 rounded-full animate-ping opacity-75"></div>
-                <div className="relative bg-white dark:bg-zinc-900 rounded-full p-4 shadow-xl border border-zinc-100 dark:border-zinc-800">
-                  <Loader2 className="animate-spin text-zinc-900 dark:text-white" size={48} />
+            <div className="p-6 space-y-6">
+              {/* Spinner + label */}
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-zinc-200 dark:bg-zinc-800 rounded-full animate-ping opacity-60" />
+                  <div className="relative bg-white dark:bg-zinc-900 rounded-full p-5 shadow-xl border border-zinc-100 dark:border-zinc-800">
+                    <Loader2 className="animate-spin text-zinc-900 dark:text-white" size={44} />
+                  </div>
+                </div>
+                <h3 className="mt-8 text-lg font-medium text-zinc-900 dark:text-white">{processingLabel}</h3>
+                <p className="text-zinc-400 text-sm mt-1">Gemini 2.5 Flash en proceso...</p>
+              </div>
+
+              {/* Skeleton preview rows */}
+              <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+                <div className="bg-zinc-50 dark:bg-zinc-800/60 px-3 py-2 border-b border-zinc-200 dark:border-zinc-800">
+                  <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Vista previa de ítems</p>
+                </div>
+                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {[1, 2, 3, 4].map((k) => (
+                    <SkeletonTableRow key={k} />
+                  ))}
                 </div>
               </div>
-              <h3 className="mt-8 text-xl font-medium text-zinc-900 dark:text-white">Gemini está analizando...</h3>
-              <p className="text-zinc-500 mt-2">Interpretando requerimientos técnicos y comerciales.</p>
             </div>
           )}
 
-          {step === 'result' && analysisResult && (
-            <div className="h-full flex flex-col">
-              <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-xl p-6 mb-6">
-                <div className="flex items-start gap-4">
-                  <div className="p-2 bg-emerald-100 dark:bg-emerald-800 rounded-lg text-emerald-700 dark:text-emerald-300">
-                    <Sparkles size={20} />
+          {/* ── STEP: REVIEW ── */}
+          {step === 'review' && (
+            <div className="p-6 space-y-5">
+              {/* Installation callout */}
+              {requiresInstallation && (
+                <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-700 dark:text-amber-400 text-sm">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                  <span>Este pedido puede requerir instalación. Agregar ítem manual si aplica.</span>
+                </div>
+              )}
+
+              {/* Quote table */}
+              <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+                {/* Table header */}
+                <div className="grid bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 px-3 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider"
+                  style={{ gridTemplateColumns: '28px 1fr 140px 120px 56px 130px 128px 112px 28px 28px' }}>
+                  <span>#</span>
+                  <span>Descripción</span>
+                  <span>Material</span>
+                  <span>Medidas (cm)</span>
+                  <span>Cant.</span>
+                  <span>Terminación</span>
+                  <span className="text-right">Precio Unit.</span>
+                  <span className="text-right">Subtotal</span>
+                  <span></span>
+                  <span></span>
+                </div>
+
+                {/* Scrollable rows */}
+                <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {reviewItems.length === 0 && (
+                    <p className="text-center text-zinc-400 text-sm py-8">No hay ítems. Agrega uno manualmente.</p>
+                  )}
+                  {reviewItems.map((item, idx) => {
+                    const invalid = item.width === 0 || item.height === 0;
+                    const lowConf = item.confidence < 0.7 && !invalid;
+                    const rowBg = invalid
+                      ? 'bg-red-500/5 dark:bg-red-900/10'
+                      : item.isOverridden
+                      ? 'bg-amber-500/5 dark:bg-amber-900/10'
+                      : 'bg-white dark:bg-zinc-900/50';
+                    const matName = materials.find(m => m.id === item.materialId)?.name ?? item.materialId;
+
+                    return (
+                      <div key={idx} className={`grid items-center gap-x-2 px-3 py-2 text-sm ${rowBg}`}
+                        style={{ gridTemplateColumns: '28px 1fr 140px 120px 56px 130px 128px 112px 28px 28px' }}>
+
+                        {/* # */}
+                        <span className="text-zinc-400 font-mono text-xs">{idx + 1}</span>
+
+                        {/* Descripción */}
+                        <input
+                          value={item.description}
+                          onChange={e => handleDescriptionChange(idx, e.target.value)}
+                          className="w-full bg-transparent border-b border-transparent hover:border-zinc-300 dark:hover:border-zinc-600 focus:border-zinc-400 outline-none text-zinc-900 dark:text-white text-xs py-0.5 truncate focus-visible:ring-2 focus-visible:ring-zinc-900 rounded"
+                        />
+
+                        {/* Material */}
+                        <span className="text-zinc-500 dark:text-zinc-400 text-xs truncate">{matName}</span>
+
+                        {/* Medidas */}
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={item.width || ''}
+                            onChange={e => handleDimensionChange(idx, 'width', parseFloat(e.target.value) || 0)}
+                            placeholder="W"
+                            className={`w-12 bg-transparent border rounded px-1 py-0.5 text-xs font-mono text-center outline-none focus-visible:ring-1 focus-visible:ring-zinc-900 ${invalid && item.width === 0 ? 'border-red-500 text-red-400' : 'border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white'}`}
+                          />
+                          <span className="text-zinc-400 text-xs">×</span>
+                          <input
+                            type="number"
+                            value={item.height || ''}
+                            onChange={e => handleDimensionChange(idx, 'height', parseFloat(e.target.value) || 0)}
+                            placeholder="H"
+                            className={`w-12 bg-transparent border rounded px-1 py-0.5 text-xs font-mono text-center outline-none focus-visible:ring-1 focus-visible:ring-zinc-900 ${invalid && item.height === 0 ? 'border-red-500 text-red-400' : 'border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white'}`}
+                          />
+                        </div>
+
+                        {/* Cantidad */}
+                        <input
+                          type="number"
+                          value={item.quantity}
+                          min={1}
+                          onChange={e => handleDimensionChange(idx, 'quantity', parseInt(e.target.value) || 1)}
+                          className="w-full bg-transparent border border-zinc-300 dark:border-zinc-700 rounded px-1 py-0.5 text-xs font-mono text-center outline-none focus-visible:ring-1 focus-visible:ring-zinc-900 text-zinc-900 dark:text-white"
+                        />
+
+                        {/* Terminación */}
+                        <div className="flex flex-wrap gap-1">
+                          {item.finishing.length > 0
+                            ? item.finishing.map(f => (
+                              <span key={f} className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded text-[10px]">{f}</span>
+                            ))
+                            : <span className="text-zinc-300 dark:text-zinc-700 text-xs">—</span>
+                          }
+                        </div>
+
+                        {/* Precio Unit. */}
+                        <div className="flex items-center justify-end gap-1">
+                          {lowConf && <AlertCircle size={12} className="text-amber-500 shrink-0" aria-label={`Confianza: ${Math.round(item.confidence * 100)}%`} />}
+                          <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400 text-xs">$</span>
+                            <input
+                              type="number"
+                              value={item.unitPrice}
+                              onChange={e => handlePriceOverride(idx, parseFloat(e.target.value) || 0)}
+                              className={`w-28 pl-5 pr-2 py-1 rounded-lg border text-xs font-mono text-right outline-none focus-visible:ring-1 focus-visible:ring-zinc-900 transition-colors ${
+                                item.isOverridden
+                                  ? 'bg-amber-500/10 border-amber-500/50 text-amber-700 dark:text-amber-400'
+                                  : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white'
+                              }`}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Subtotal */}
+                        <span className="text-right font-mono text-xs text-zinc-700 dark:text-zinc-300">{formatCLP(item.subtotal)}</span>
+
+                        {/* Tooltip ⓘ */}
+                        <div className="relative group/tip flex justify-center">
+                          <button className="p-0.5 text-zinc-400 hover:text-zinc-600">
+                            <Info size={13} />
+                          </button>
+                          <div className="pointer-events-none absolute right-0 bottom-7 hidden group-hover/tip:block z-20 w-52 bg-zinc-900 border border-zinc-700 rounded-xl p-3 shadow-2xl text-xs space-y-1">
+                            <p className="text-zinc-400">Base: <span className="text-white font-mono">{formatCLP(item.calculationBreakdown.baseCost)}</span></p>
+                            <p className="text-zinc-400">Multiplicador: <span className="text-white font-mono">{item.calculationBreakdown.finishingMultiplier}×</span></p>
+                            <p className="text-zinc-400">Addons: <span className="text-white font-mono">{formatCLP(item.calculationBreakdown.finishingAddons)}</span></p>
+                            {item.calculationBreakdown.planchasUsed !== undefined && (
+                              <p className="text-zinc-400">Planchas: <span className="text-white font-mono">{item.calculationBreakdown.planchasUsed.toFixed(3)}</span></p>
+                            )}
+                            <p className="text-zinc-400">Sugerido: <span className="text-white font-mono">{formatCLP(item.suggestedUnitPrice)}</span></p>
+                          </div>
+                        </div>
+
+                        {/* Delete */}
+                        <button onClick={() => handleDeleteItem(idx)} className="flex justify-center p-0.5 text-zinc-400 hover:text-red-500 transition-colors">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Add item row */}
+                <div className="px-3 py-2 border-t border-zinc-100 dark:border-zinc-800">
+                  <button onClick={handleAddItem} className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 rounded">
+                    <Plus size={13} /> Agregar ítem
+                  </button>
+                </div>
+              </div>
+
+              {/* Order details */}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5 block">Nombre Campaña</label>
+                  <input
+                    value={campaignName}
+                    onChange={e => setCampaignName(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-400 focus-visible:ring-2 focus-visible:ring-zinc-900 transition-all text-zinc-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5 block">Fecha Entrega</label>
+                  <input
+                    type="date"
+                    value={deliveryDate}
+                    onChange={e => setDeliveryDate(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-400 focus-visible:ring-2 focus-visible:ring-zinc-900 transition-all text-zinc-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5 block">Estado Archivo</label>
+                  <div className="flex gap-2">
+                    {(['Rojo', 'Amarillo', 'Verde'] as const).map(s => (
+                      <label key={s} className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border cursor-pointer transition-all text-xs font-medium ${
+                        fileStatus === s
+                          ? s === 'Rojo' ? 'bg-red-500/15 border-red-500 text-red-500'
+                            : s === 'Amarillo' ? 'bg-amber-500/15 border-amber-500 text-amber-600 dark:text-amber-400'
+                            : 'bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                          : 'border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:border-zinc-400'
+                      }`}>
+                        <input type="radio" className="hidden" checked={fileStatus === s} onChange={() => setFileStatus(s)} />
+                        <span className={`w-1.5 h-1.5 rounded-full ${s === 'Rojo' ? 'bg-red-500' : s === 'Amarillo' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                        {s}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary panel */}
+              <div className="bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-700 rounded-xl p-4 flex items-center justify-between">
+                <div className="flex gap-8">
+                  <div>
+                    <p className="text-xs text-zinc-400 uppercase tracking-wider mb-0.5">Subtotal ítems</p>
+                    <p className="font-mono font-semibold text-zinc-900 dark:text-white">{formatCLP(subtotal)}</p>
                   </div>
                   <div>
-                    <h3 className="font-semibold text-emerald-900 dark:text-emerald-200">Análisis Completado</h3>
-                    <p className="text-emerald-700 dark:text-emerald-400 text-sm mt-1">Se han detectado los siguientes parámetros.</p>
+                    <p className="text-xs text-zinc-400 uppercase tracking-wider mb-0.5">Despacho</p>
+                    <p className="font-mono font-semibold text-zinc-700 dark:text-zinc-300">{formatCLP(pricingConfig.despachoCost)}</p>
                   </div>
                 </div>
-              </div>
-
-              <div className="space-y-4 flex-1">
-                 <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700 mb-4">
-                     <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">Campaña</span>
-                     <span className="text-zinc-900 dark:text-white font-medium text-lg">{analysisResult.campaignName}</span>
-                     <p className="text-zinc-500 text-sm mt-1">{analysisResult.description}</p>
-                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                   <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                     <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">Material Detectado</span>
-                     <span className="text-zinc-900 dark:text-white font-medium">{analysisResult.materialName}</span>
-                   </div>
-                   <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                     <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">Medidas</span>
-                     <span className="text-zinc-900 dark:text-white font-medium">{analysisResult.width} x {analysisResult.height} cm</span>
-                   </div>
-                   <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                     <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">Cantidad</span>
-                     <span className="text-zinc-900 dark:text-white font-medium">{analysisResult.quantity} Unidades</span>
-                   </div>
-                   <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                     <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider block mb-1">Costo Estimado</span>
-                     <span className="text-zinc-900 dark:text-white font-medium">
-                       {new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(analysisResult.estimatedCost)}
-                     </span>
-                   </div>
+                <div className="text-right">
+                  <p className="text-xs text-zinc-400 uppercase tracking-wider mb-0.5">TOTAL</p>
+                  <p className="font-mono font-bold text-xl text-zinc-900 dark:text-white">{formatCLP(total)}</p>
                 </div>
               </div>
+
+              {hasInvalidItems && (
+                <p className="flex items-center gap-2 text-red-500 dark:text-red-400 text-xs">
+                  <AlertCircle size={13} /> Algunos ítems tienen medidas en 0 — corrígelos antes de crear la orden.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── STEP: SUCCESS ── */}
+          {step === 'success' && (
+            <div className="flex flex-col items-center justify-center py-24 gap-4">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                <CheckCircle size={36} className="text-emerald-500" />
+              </div>
+              <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Orden creada</h3>
+              <p className="text-zinc-500">→ <span className="text-zinc-900 dark:text-white font-medium">{createdCampaignName}</span></p>
+              <p className="text-zinc-400 text-xs">Cerrando automáticamente...</p>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-end gap-3">
-          {step === 'input' ? (
-            <button 
-              onClick={handleAnalyze}
-              disabled={!emailText.trim() && files.length === 0}
-              className="px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
-            >
-              Analizar con Gemini <Sparkles size={16} />
-            </button>
-          ) : step === 'result' ? (
-             <button 
-              onClick={handleCreateOrder}
-              className="px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-medium text-sm hover:opacity-90 transition-all flex items-center gap-2"
-            >
-              Crear Orden <ArrowRight size={16} />
-            </button>
-          ) : null}
-        </div>
-
+        {(step === 'input' || step === 'review') && (
+          <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-between items-center shrink-0">
+            {step === 'review' ? (
+              <>
+                <button
+                  onClick={() => setStep('input')}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 rounded-lg"
+                >
+                  <ArrowLeft size={15} /> Editar solicitud
+                </button>
+                <button
+                  onClick={handleCreateOrder}
+                  disabled={hasInvalidItems || reviewItems.length === 0}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
+                >
+                  Crear Orden <ArrowRight size={15} />
+                </button>
+              </>
+            ) : (
+              <>
+                <div /> {/* spacer */}
+                <button
+                  onClick={handleAnalyze}
+                  disabled={!selectedCustomerId || (!emailText.trim() && files.length === 0)}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
+                >
+                  Analizar con Gemini <Sparkles size={15} />
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

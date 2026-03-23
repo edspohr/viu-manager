@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStore, type UserRole } from '../../store/useStore';
 import { Users, Shield, Briefcase, UserCheck } from 'lucide-react';
 
@@ -15,6 +15,16 @@ export const DevLoginModal = () => {
     switchUser(role);
     setIsOpen(false);
   };
+
+  // Close on Escape key
+  const handleEsc = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape' && isOpen) setIsOpen(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [handleEsc]);
 
   if (!isOpen) return (
     <button 
