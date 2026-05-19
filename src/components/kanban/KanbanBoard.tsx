@@ -24,7 +24,7 @@ import { toast } from 'sonner';
 import { useStore, type UserRole } from '../../store/useStore';
 import { cn } from '../../lib/utils';
 import { formatCLP } from '../../lib/formatters';
-import { Inbox, Sparkles, Settings, CheckCircle2, Box, Truck, Receipt, Search, Plus, CalendarDays } from 'lucide-react';
+import { Inbox, Sparkles, Settings, CheckCircle2, Box, Truck, Receipt, Search, Plus, CalendarDays, Download } from 'lucide-react';
 import type { Order, Customer, Material } from '../../data/mockData';
 import { OrderCard } from './OrderCard';
 import { SkeletonCard } from '../ui/Skeleton';
@@ -128,7 +128,7 @@ function SortableItem({
 export function KanbanBoard() {
   const {
     orders, customers, materials,
-    updateOrderStatus, currentUser, switchUser,
+    updateOrderStatus, currentUser, switchUser, exportOrdersCSV,
   } = useStore();
 
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -138,6 +138,9 @@ export function KanbanBoard() {
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showCsvPanel, setShowCsvPanel] = useState(false);
+  const [csvFrom, setCsvFrom] = useState('');
+  const [csvTo, setCsvTo] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -317,6 +320,20 @@ export function KanbanBoard() {
               </button>
             )}
 
+            {/* CSV export — admin/superadmin */}
+            {(currentUser.role === 'admin' || currentUser.role === 'superadmin') && (
+              <button
+                onClick={() => setShowCsvPanel((v) => !v)}
+                className={cn(
+                  'p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 rounded-lg',
+                  showCsvPanel ? 'text-zinc-900 bg-zinc-100' : 'text-zinc-400 hover:text-zinc-900'
+                )}
+                title="Exportar CSV"
+              >
+                <Download size={18} />
+              </button>
+            )}
+
             {/* Config */}
             {currentUser.role === 'superadmin' && (
               <button
@@ -357,6 +374,40 @@ export function KanbanBoard() {
               </span>
             </span>
           )}
+          {/* CSV export panel */}
+          {showCsvPanel && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && (
+            <div className="flex items-center gap-3 py-2 px-1 border-t border-zinc-100 mt-1">
+              <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Exportar órdenes</span>
+              <input
+                type="date"
+                value={csvFrom}
+                onChange={(e) => setCsvFrom(e.target.value)}
+                className="px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-700"
+              />
+              <span className="text-zinc-400 text-xs">→</span>
+              <input
+                type="date"
+                value={csvTo}
+                onChange={(e) => setCsvTo(e.target.value)}
+                className="px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-700"
+              />
+              <button
+                onClick={() => {
+                  if (!csvFrom || !csvTo) {
+                    toast.error('Selecciona un rango de fechas');
+                    return;
+                  }
+                  exportOrdersCSV(csvFrom, csvTo);
+                  toast.success('CSV generado');
+                }}
+                disabled={!csvFrom || !csvTo}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 text-white text-xs font-medium rounded-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                <Download size={12} /> Descargar
+              </button>
+            </div>
+          )}
+
           {searchQuery.trim() && (
             <span className="text-zinc-500">
               {displayOrders.length} resultado{displayOrders.length !== 1 ? 's' : ''} para{' '}
