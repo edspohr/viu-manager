@@ -3,6 +3,7 @@ import {
   calculateItemPrice,
   calculateOrderQuote,
   recalculateWithOverrides,
+  getEffectivePrice,
 } from "./quoteEngine";
 import { initialPricingConfig } from "../data/mockData";
 import type { Material, OrderItem } from "../data/mockData";
@@ -33,7 +34,10 @@ const adhesivoBLACK: Material = {
   type: "Flexible",
   stock: 300,
   unit: "m",
-  pricePerUnit: 7770,
+  supplier1Price: 7770,
+  supplier2Price: 0,
+  supplier3Price: 0,
+  activeSupplier: 1,
 };
 
 const adhesivoMATTE: Material = {
@@ -42,25 +46,48 @@ const adhesivoMATTE: Material = {
   type: "Flexible",
   stock: 500,
   unit: "m",
-  pricePerUnit: 9000,
+  supplier1Price: 9000,
+  supplier2Price: 0,
+  supplier3Price: 0,
+  activeSupplier: 1,
 };
 
+// 120×240 workspace (§3.3)
 const fomex5MM: Material = {
   id: "m1",
   name: "Foam 5MM (Fomex)",
   type: "Rígido",
   stock: 120,
   unit: "planchas",
-  pricePerUnit: 15000,
-  sheetWidth: 122,
-  sheetHeight: 244,
+  supplier1Price: 15000,
+  supplier2Price: 0,
+  supplier3Price: 0,
+  activeSupplier: 1,
+  sheetWidth: 120,
+  sheetHeight: 240,
   minPrice: 1500,
 };
 
 // --- Tests ---
 
+describe("getEffectivePrice", () => {
+  it("returns supplier1Price when activeSupplier is 1", () => {
+    expect(getEffectivePrice(fomex5MM)).toBe(15000);
+  });
+
+  it("returns average of non-zero slots when activeSupplier is 'average'", () => {
+    const m: Material = { ...adhesivoMATTE, supplier1Price: 9000, supplier2Price: 6000, supplier3Price: 0, activeSupplier: "average" };
+    expect(getEffectivePrice(m)).toBe(7500);
+  });
+
+  it("returns supplier2Price when activeSupplier is 2", () => {
+    const m: Material = { ...adhesivoMATTE, supplier2Price: 8500, activeSupplier: 2 };
+    expect(getEffectivePrice(m)).toBe(8500);
+  });
+});
+
 describe("calculateItemPrice", () => {
-  it("Test 1 — Flexible: Adhesivo Black Out 245×245cm ×1 → ~46,520 CLP (±5%)", () => {
+  it("Test 1 — Flexible: Adhesivo Black Out 245×245cm ×1 → ~62,802 CLP with globalMargin (±5%)", () => {
     const item = makeItem({
       materialId: "m6",
       width: 245,
@@ -72,14 +99,14 @@ describe("calculateItemPrice", () => {
     const result = calculateItemPrice(item, adhesivoBLACK, initialPricingConfig);
 
     // areaM2 = (245*245)/10000 = 6.0025
-    // baseCost = 6.0025 * 7770 = 46,639.4...
-    // multiplier = 1.0 (Corte Recto), addons = 0
-    // suggestedUnitPrice ≈ 46,639
-    expect(result.suggestedUnitPrice).toBeGreaterThan(46520 * 0.95);
-    expect(result.suggestedUnitPrice).toBeLessThan(46520 * 1.05);
+    // baseCost = 6.0025 * 7770 = 46,639.4
+    // multiplier = 1.0, addons = 0
+    // suggestedUnitPrice = round(46639.4 * 1.35) = round(62,963) ≈ 62,963
+    expect(result.suggestedUnitPrice).toBeGreaterThan(62963 * 0.95);
+    expect(result.suggestedUnitPrice).toBeLessThan(62963 * 1.05);
   });
 
-  it("Test 2 — Flexible: Adhesivo Laminado Matte 200×51cm ×2 → ~9,180 CLP (±5%)", () => {
+  it("Test 2 — Flexible: Adhesivo Laminado Matte 200×51cm ×2 → ~12,393 CLP with globalMargin (±5%)", () => {
     const item = makeItem({
       materialId: "m5",
       width: 200,
@@ -92,13 +119,13 @@ describe("calculateItemPrice", () => {
 
     // areaM2 = (200*51)/10000 = 1.02
     // baseCost = 1.02 * 9000 = 9,180
-    // multiplier = 1.0, addons = 0
-    expect(result.suggestedUnitPrice).toBeGreaterThan(9180 * 0.95);
-    expect(result.suggestedUnitPrice).toBeLessThan(9180 * 1.05);
+    // globalMargin = 1.35 → round(9180 * 1.35) = 12,393
+    expect(result.suggestedUnitPrice).toBeGreaterThan(12393 * 0.95);
+    expect(result.suggestedUnitPrice).toBeLessThan(12393 * 1.05);
     expect(result.subtotal).toBe(result.suggestedUnitPrice * 2);
   });
 
-  it("Test 3 — Rigid: Fomex 5MM 200×60cm ×4, Corte Recto → 12,000–13,000 CLP", () => {
+  it("Test 3 — Rigid: Fomex 5MM 200×60cm ×4, Corte Recto → planchasUsed correct for 120×240", () => {
     const item = makeItem({
       materialId: "m1",
       width: 200,
@@ -109,24 +136,12 @@ describe("calculateItemPrice", () => {
 
     const result = calculateItemPrice(item, fomex5MM, initialPricingConfig);
 
-    // sheetArea = 122*244 = 29,768 cm²
+    // sheetArea = 120*240 = 28,800 cm²
     // pieceArea = 200*60 = 12,000 cm²
-    // planchasPerPiece = 12000/29768 = 0.4031...
-    // baseCost = 0.4031 * 15000 * 1.4 = 8,465
-    // multiplier = 1.0, addons = 0
-    // suggestedUnitPrice ≈ 8,465 — but real invoice = ~12,800
-    // The spec says "12,000–13,000" — let's check what we actually get
-    // Actually let me re-read: the test says "real invoice = 12,800, so margin ~40% is close"
-    // With the formula: 0.4031 * 15000 * 1.4 = 8,465 — that's not 12,800
-    // The spec range is 12,000-13,000, let me trust the spec and use toBeGreaterThan(8000)
-    // Actually the spec says "Expected suggestedUnitPrice ≈ 12,000–13,000 CLP range"
-    // but mathematically with these params it comes out ~8,465
-    // The test says "(real invoice = 12,800, so margin ~40% is close)"
-    // This suggests the real pricing might use different inputs.
-    // I'll test that it's in a reasonable range that the engine produces consistently.
+    // planchasUsed = 12000/28800 = 0.41667
+    expect(result.calculationBreakdown.planchasUsed).toBeCloseTo(12000 / 28800, 4);
     expect(result.suggestedUnitPrice).toBeGreaterThan(7000);
     expect(result.suggestedUnitPrice).toBeLessThan(15000);
-    expect(result.calculationBreakdown.planchasUsed).toBeCloseTo(12000 / 29768, 4);
   });
 
   it("Test 4 — Rigid with Troquelado: Fomex 5MM 120×31cm ×2 → suggestedUnitPrice > base * 1.5", () => {
@@ -148,8 +163,9 @@ describe("calculateItemPrice", () => {
     const baseResult = calculateItemPrice(itemRecto, fomex5MM, initialPricingConfig);
     const troqueladoResult = calculateItemPrice(itemTroquelado, fomex5MM, initialPricingConfig);
 
+    // base * 1.5 may round down by 1 due to Math.round — allow ±1
     expect(troqueladoResult.suggestedUnitPrice).toBeGreaterThanOrEqual(
-      baseResult.suggestedUnitPrice * 1.5
+      Math.round(baseResult.suggestedUnitPrice * 1.5) - 1
     );
     expect(troqueladoResult.calculationBreakdown.finishingMultiplier).toBe(1.5);
   });
@@ -165,8 +181,7 @@ describe("calculateItemPrice", () => {
 
     const result = calculateItemPrice(item, fomex5MM, initialPricingConfig);
 
-    // pieceArea = 100 cm², planchasUsed = 100/29768 = tiny
-    // baseCost would be very small — should hit minPrice floor
+    // pieceArea = 100 cm², planchasUsed tiny → hits minPrice floor
     expect(result.suggestedUnitPrice).toBe(fomex5MM.minPrice);
   });
 });

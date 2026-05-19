@@ -27,7 +27,10 @@ const UNKNOWN_MATERIAL: Material = {
   type: "Flexible",
   stock: 0,
   unit: "u",
-  pricePerUnit: 0,
+  supplier1Price: 0,
+  supplier2Price: 0,
+  supplier3Price: 0,
+  activeSupplier: 1,
 };
 
 /** Clamp a number so it is never NaN or Infinity. Returns 0 for bad values. */
@@ -36,15 +39,29 @@ function safeNum(n: number): number {
   return n;
 }
 
+/**
+ * Returns the effective price per unit for a material based on its activeSupplier.
+ * "average" computes the mean of all non-zero supplier slots.
+ */
+export function getEffectivePrice(m: Material): number {
+  if (m.activeSupplier === "average") {
+    const slots = [m.supplier1Price, m.supplier2Price, m.supplier3Price].filter((p) => p > 0);
+    return slots.length > 0 ? slots.reduce((a, b) => a + b, 0) / slots.length : 0;
+  }
+  if (m.activeSupplier === 1) return m.supplier1Price;
+  if (m.activeSupplier === 2) return m.supplier2Price;
+  return m.supplier3Price;
+}
+
 export function calculateItemPrice(
   item: OrderItem,
   material: Material,
   config: PricingConfig
 ): CalculatedItem {
-  // —— Edge case: quantity <= 0 → default to 1 ——
+  // Edge case: quantity <= 0 → default to 1
   const quantity = item.quantity > 0 ? item.quantity : 1;
 
-  // —— Edge case: width or height is 0 → suggestedUnitPrice = 0 + warning ——
+  // Edge case: width or height is 0 → suggestedUnitPrice = 0 + warning
   if (item.width === 0 || item.height === 0) {
     return {
       ...item,
@@ -75,44 +92,61 @@ export function calculateItemPrice(
     0
   );
 
+  const effectivePrice = getEffectivePrice(material);
   let baseCost: number;
   let planchasUsed: number | undefined;
 
   if (material.type === "Flexible") {
     const areaM2 = (item.width * item.height) / 10000;
-    baseCost = safeNum(areaM2 * material.pricePerUnit);
+    baseCost = safeNum(areaM2 * effectivePrice);
     if (item.doubleSided) baseCost *= 2;
+    // Apply globalMargin to flexible materials
+    let suggestedUnitPrice = Math.round(
+      safeNum(baseCost * finishingMultiplier + finishingAddons) * (1 + config.globalMargin)
+    );
+    suggestedUnitPrice = Math.max(suggestedUnitPrice, material.minPrice ?? 0);
+    const subtotal = safeNum(suggestedUnitPrice * quantity);
+    return {
+      ...item,
+      quantity,
+      suggestedUnitPrice,
+      unitPrice: suggestedUnitPrice,
+      subtotal,
+      calculationBreakdown: {
+        baseCost: safeNum(baseCost),
+        finishingMultiplier: safeNum(finishingMultiplier),
+        finishingAddons: safeNum(finishingAddons),
+      },
+    };
   } else {
+    // Rigid: 120×240 safety perimeter workspace (§3.3)
     const sheetArea =
-      (material.sheetWidth ?? 122) * (material.sheetHeight ?? 244);
+      (material.sheetWidth ?? 120) * (material.sheetHeight ?? 240);
     const pieceArea = item.width * item.height;
     planchasUsed = sheetArea > 0 ? safeNum(pieceArea / sheetArea) : 0;
     baseCost = safeNum(
-      planchasUsed * material.pricePerUnit * (1 + config.rigidMargin)
+      planchasUsed * effectivePrice * (1 + config.rigidMargin)
     );
     if (item.doubleSided) baseCost *= 2;
+    let suggestedUnitPrice = Math.round(
+      safeNum(baseCost * finishingMultiplier + finishingAddons)
+    );
+    suggestedUnitPrice = Math.max(suggestedUnitPrice, material.minPrice ?? 0);
+    const subtotal = safeNum(suggestedUnitPrice * quantity);
+    return {
+      ...item,
+      quantity,
+      suggestedUnitPrice,
+      unitPrice: suggestedUnitPrice,
+      subtotal,
+      calculationBreakdown: {
+        baseCost: safeNum(baseCost),
+        finishingMultiplier: safeNum(finishingMultiplier),
+        finishingAddons: safeNum(finishingAddons),
+        planchasUsed: safeNum(planchasUsed),
+      },
+    };
   }
-
-  let suggestedUnitPrice = Math.round(
-    safeNum(baseCost * finishingMultiplier + finishingAddons)
-  );
-  suggestedUnitPrice = Math.max(suggestedUnitPrice, material.minPrice ?? 0);
-
-  const subtotal = safeNum(suggestedUnitPrice * quantity);
-
-  return {
-    ...item,
-    quantity,
-    suggestedUnitPrice,
-    unitPrice: suggestedUnitPrice,
-    subtotal,
-    calculationBreakdown: {
-      baseCost: safeNum(baseCost),
-      finishingMultiplier: safeNum(finishingMultiplier),
-      finishingAddons: safeNum(finishingAddons),
-      ...(planchasUsed !== undefined ? { planchasUsed: safeNum(planchasUsed) } : {}),
-    },
-  };
 }
 
 export function calculateOrderQuote(
@@ -123,7 +157,7 @@ export function calculateOrderQuote(
   const materialMap = new Map(materials.map((m) => [m.id, m]));
 
   const calculatedItems = items.map((item) => {
-    // —— Edge case: materialId not found → use fallback material ——
+    // Edge case: materialId not found → use fallback material
     const material = materialMap.get(item.materialId) ?? UNKNOWN_MATERIAL;
     return calculateItemPrice(item, material, config);
   });

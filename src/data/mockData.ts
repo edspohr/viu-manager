@@ -12,9 +12,12 @@ export interface Material {
   type: "Rígido" | "Flexible";
   stock: number;
   unit: string; // "planchas" for rigid, "m" for flexible
-  pricePerUnit: number; // CLP per plancha (rigid) or CLP per m² (flexible)
-  sheetWidth?: number; // cm — only for rigid, default 122
-  sheetHeight?: number; // cm — only for rigid, default 244
+  supplier1Price: number; // CLP per plancha (rigid) or CLP per m² (flexible)
+  supplier2Price: number;
+  supplier3Price: number;
+  activeSupplier: 1 | 2 | 3 | "average";
+  sheetWidth?: number; // cm — only for rigid, safety perimeter: 120×240
+  sheetHeight?: number; // cm — only for rigid, safety perimeter: 120×240
   minPrice?: number; // minimum CLP per piece (floor price)
 }
 
@@ -60,6 +63,8 @@ export interface Order {
 export interface PricingConfig {
   // Rigid material calculation
   rigidMargin: number; // markup on top of raw plancha cost, e.g. 0.4 = 40%
+  // Flexible material global margin (applied after all other calculations)
+  globalMargin: number; // e.g. 0.35 = 35%
   // Finishing multipliers (applied to base unit price)
   finishingMultipliers: {
     "Corte Recto": number; // 1.0 (baseline)
@@ -84,6 +89,7 @@ export interface PricingConfig {
 
 export const initialPricingConfig: PricingConfig = {
   rigidMargin: 0.4,
+  globalMargin: 0.35,
   finishingMultipliers: {
     "Corte Recto": 1.0,
     Troquelado: 1.5,
@@ -148,9 +154,12 @@ export const materials: Material[] = [
     type: "Rígido",
     stock: 120,
     unit: "planchas",
-    pricePerUnit: 15000,
-    sheetWidth: 122,
-    sheetHeight: 244,
+    supplier1Price: 15000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+    sheetWidth: 120,
+    sheetHeight: 240,
     minPrice: 1500,
   },
   {
@@ -159,9 +168,12 @@ export const materials: Material[] = [
     type: "Rígido",
     stock: 85,
     unit: "planchas",
-    pricePerUnit: 12000,
-    sheetWidth: 122,
-    sheetHeight: 244,
+    supplier1Price: 12000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+    sheetWidth: 120,
+    sheetHeight: 240,
     minPrice: 1500,
   },
   {
@@ -170,9 +182,12 @@ export const materials: Material[] = [
     type: "Rígido",
     stock: 40,
     unit: "planchas",
-    pricePerUnit: 18000,
-    sheetWidth: 122,
-    sheetHeight: 244,
+    supplier1Price: 18000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+    sheetWidth: 120,
+    sheetHeight: 240,
     minPrice: 2000,
   },
   {
@@ -181,9 +196,12 @@ export const materials: Material[] = [
     type: "Rígido",
     stock: 200,
     unit: "planchas",
-    pricePerUnit: 8000,
-    sheetWidth: 122,
-    sheetHeight: 244,
+    supplier1Price: 8000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+    sheetWidth: 120,
+    sheetHeight: 240,
     minPrice: 1200,
   },
   {
@@ -192,7 +210,10 @@ export const materials: Material[] = [
     type: "Flexible",
     stock: 500,
     unit: "m",
-    pricePerUnit: 9000,
+    supplier1Price: 9000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
   },
   {
     id: "m6",
@@ -200,7 +221,10 @@ export const materials: Material[] = [
     type: "Flexible",
     stock: 300,
     unit: "m",
-    pricePerUnit: 7770,
+    supplier1Price: 7770,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
   },
   {
     id: "m7",
@@ -208,7 +232,10 @@ export const materials: Material[] = [
     type: "Flexible",
     stock: 300,
     unit: "m",
-    pricePerUnit: 10500,
+    supplier1Price: 10500,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
   },
   {
     id: "m8",
@@ -216,7 +243,10 @@ export const materials: Material[] = [
     type: "Flexible",
     stock: 150,
     unit: "m",
-    pricePerUnit: 6800,
+    supplier1Price: 6800,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
   },
   {
     id: "m9",
@@ -224,7 +254,10 @@ export const materials: Material[] = [
     type: "Flexible",
     stock: 100,
     unit: "m",
-    pricePerUnit: 11500,
+    supplier1Price: 11500,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
   },
 ];
 

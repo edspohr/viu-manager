@@ -94,7 +94,7 @@ ${materialList}
 - width: number in cm (0 if unknown)
 - height: number in cm (0 if unknown)
 - quantity: number (default 1)
-- finishing: array of strings from: ["Corte Recto","Troquelado","Corte CNC","Tiro y Retiro","Ojetillos","Pie de Apoyo","Bolsillo Superior","Instalación"]
+- finishing: array of strings from: ["Corte Recto","Troquelado","Corte CNC","Tiro y Retiro","Corte Contorno","Ojetillos","Pie de Apoyo","Bolsillo Superior","Instalación"]
 - doubleSided: boolean
 - confidence: 0.0–1.0 (your confidence this item is correctly extracted)
 

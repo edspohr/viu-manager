@@ -1,16 +1,30 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useStore } from '../../store/useStore';
 import { formatCLP } from '../../lib/formatters';
 import {
   X, Upload, Sparkles, ArrowRight, ArrowLeft, Loader2,
-  AlertCircle, Trash2, Plus, Info, CheckCircle,
+  AlertCircle, Trash2, Plus, Info, CheckCircle, ChevronDown,
 } from 'lucide-react';
 import { extractOrderItems } from '../../lib/geminiService';
 import { calculateItemPrice, calculateOrderQuote } from '../../lib/quoteEngine';
 import type { ExtractedItem } from '../../lib/geminiService';
 import type { OrderItem } from '../../data/mockData';
 import { SkeletonTableRow } from '../ui/Skeleton';
+
+// All valid finishing options (must match geminiService prompt + PricingConfig keys)
+const ALL_FINISHINGS = [
+  'Corte Recto',
+  'Troquelado',
+  'Corte CNC',
+  'Tiro y Retiro',
+  'Corte Contorno',
+  'Ojetillos',
+  'Pie de Apoyo',
+  'Bolsillo Superior',
+  'Refuerzo',
+  'Instalación',
+] as const;
 
 interface AICotizadorModalProps {
   isOpen: boolean;
@@ -69,10 +83,29 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
   // Success
   const [createdCampaignName, setCreatedCampaignName] = useState('');
 
+  // Finishing popover open state per row index
+  const [finishingOpen, setFinishingOpen] = useState<number | null>(null);
+  const finishingPopoverRef = useRef<HTMLDivElement>(null);
+
+  // Close finishing popover when clicking outside
+  useEffect(() => {
+    if (finishingOpen === null) return;
+    const handler = (e: MouseEvent) => {
+      if (finishingPopoverRef.current && !finishingPopoverRef.current.contains(e.target as Node)) {
+        setFinishingOpen(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [finishingOpen]);
+
   // ── Close on Escape key ────────────────────────────────────────────────────
   const handleEsc = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape') onClose();
-  }, [onClose]);
+    if (e.key === 'Escape') {
+      if (finishingOpen !== null) { setFinishingOpen(null); return; }
+      onClose();
+    }
+  }, [onClose, finishingOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -159,6 +192,22 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
     setReviewItems(prev => prev.filter((_, i) => i !== idx));
   };
 
+  const handleFinishingChange = (idx: number, finishing: string[]) => {
+    setReviewItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      const updated = { ...item, finishing };
+      const material = materials.find(m => m.id === updated.materialId);
+      if (!material) return updated;
+      const recalc = calculateItemPrice(updated, material, pricingConfig);
+      return {
+        ...recalc,
+        description: item.description,
+        confidence: item.confidence,
+        isOverridden: item.isOverridden,
+      };
+    }));
+  };
+
   const handleAddItem = () => {
     const firstMaterial = materials[0];
     const blank: ReviewItem = {
@@ -231,6 +280,7 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
     setDeliveryDate('');
     setFileStatus('Amarillo');
     setRequiresInstallation(false);
+    setFinishingOpen(null);
   };
 
   const currentStepIdx = STEP_ORDER.indexOf(step);
@@ -477,14 +527,42 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
                           className="w-full bg-transparent border border-zinc-300 dark:border-zinc-700 rounded px-1 py-0.5 text-xs font-mono text-center outline-none focus-visible:ring-1 focus-visible:ring-zinc-900 text-zinc-900 dark:text-white"
                         />
 
-                        {/* Terminación */}
-                        <div className="flex flex-wrap gap-1">
-                          {item.finishing.length > 0
-                            ? item.finishing.map(f => (
-                              <span key={f} className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded text-[10px]">{f}</span>
-                            ))
-                            : <span className="text-zinc-300 dark:text-zinc-700 text-xs">—</span>
-                          }
+                        {/* Terminación — editable popover */}
+                        <div className="relative" ref={finishingOpen === idx ? finishingPopoverRef : undefined}>
+                          <button
+                            onClick={() => setFinishingOpen(finishingOpen === idx ? null : idx)}
+                            className="flex items-center gap-1 w-full text-left"
+                          >
+                            <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                              {item.finishing.length > 0
+                                ? item.finishing.map(f => (
+                                  <span key={f} className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded text-[10px] whitespace-nowrap">{f}</span>
+                                ))
+                                : <span className="text-zinc-300 dark:text-zinc-700 text-xs">—</span>
+                              }
+                            </div>
+                            <ChevronDown size={10} className="text-zinc-400 shrink-0" />
+                          </button>
+                          {finishingOpen === idx && (
+                            <div className="absolute left-0 top-full mt-1 z-30 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl p-2 min-w-[170px]">
+                              {ALL_FINISHINGS.map(f => (
+                                <label key={f} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={item.finishing.includes(f)}
+                                    onChange={(e) => {
+                                      const next = e.target.checked
+                                        ? [...item.finishing, f]
+                                        : item.finishing.filter(x => x !== f);
+                                      handleFinishingChange(idx, next);
+                                    }}
+                                    className="w-3.5 h-3.5 accent-zinc-900"
+                                  />
+                                  <span className="text-xs text-zinc-700 dark:text-zinc-300">{f}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Precio Unit. */}

@@ -98,10 +98,10 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'viu-manager-storage',
-      version: 3, // Bump version to 3
+      version: 4,
       migrate: (persistedState: unknown, version: number) => {
-        if (version < 3) {
-          // If version is old, reset to default state
+        if (version < 4) {
+          // Material interface changed (pricePerUnit → supplier slots, globalMargin added)
           return {
             currentUser: { role: 'admin', id: 'admin1' },
             orders: initialOrders,
