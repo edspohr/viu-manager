@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
   X, ChevronRight, ChevronDown, Sparkles,
-  AlertCircle, User, Calendar, Hash, ArrowRight,
+  AlertCircle, User, Calendar, Hash, ArrowRight, Cpu, Clock, Zap,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { formatCLP, formatDate } from '../../lib/formatters';
@@ -65,6 +65,7 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
   const {
     orders, customers, materials, pricingConfig, currentUser,
     updateOrderStatus, updateFileStatus, updateOrderItemPrice, updateOperationsChecklist,
+    updateMachineAssignment, updateManHours, updateOvertimeEnabled,
   } = useStore();
 
   const order = orders.find(o => o.id === orderId) ?? null;
@@ -342,6 +343,66 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
         Checklist de Operaciones
       </h3>
 
+      {/* Machine assignment + man-hours + overtime */}
+      <div className="mb-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Machine */}
+        <div>
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+            <Cpu size={11} /> Máquina
+          </label>
+          <select
+            value={order.machineAssignment ?? ''}
+            onChange={(e) => updateMachineAssignment(order.id, e.target.value)}
+            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-sm text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-colors"
+          >
+            <option value="">Sin asignar</option>
+            {pricingConfig.machines.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Man-hours */}
+        <div>
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+            <Clock size={11} /> Horas (HH)
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            value={order.manHours ?? ''}
+            onChange={(e) => updateManHours(order.id, parseFloat(e.target.value) || 0)}
+            placeholder="0.0"
+            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-sm font-mono text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-colors"
+          />
+        </div>
+
+        {/* Overtime */}
+        <div>
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+            <Zap size={11} /> Turno Extra
+          </label>
+          <label className="flex items-center gap-2.5 px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-xl cursor-pointer hover:bg-zinc-100 transition-colors">
+            <input
+              type="checkbox"
+              checked={order.overtimeEnabled ?? false}
+              onChange={(e) => updateOvertimeEnabled(order.id, e.target.checked)}
+              className="w-4 h-4 rounded accent-zinc-900"
+            />
+            <span className="text-sm text-zinc-700">Fin de semana</span>
+            {order.overtimeEnabled && (
+              <span className="ml-auto text-xs font-semibold text-amber-600">+25%</span>
+            )}
+          </label>
+          {order.overtimeEnabled && order.totalAmount > 0 && (
+            <p className="mt-1 text-xs text-amber-600 font-mono pl-1">
+              Recargo: +{new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(order.totalAmount * 0.25))}
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Progress bar */}
       <div className="mb-4">
         <div className="flex justify-between text-xs text-zinc-500 mb-1.5">
@@ -549,7 +610,7 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
             ) : (
               <>
                 {renderItemsTable()}
-                {isOperations && renderOperationsChecklist()}
+                {(isOperations || isAdmin) && renderOperationsChecklist()}
                 {renderDescription()}
               </>
             )}

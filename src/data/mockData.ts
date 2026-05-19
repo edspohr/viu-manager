@@ -58,6 +58,9 @@ export interface Order {
   fileStatus: "Rojo" | "Amarillo" | "Verde";
   operationsChecklist?: boolean[]; // 5-item checklist, persisted
   aiGenerated?: boolean;
+  machineAssignment?: string;
+  manHours?: number;
+  overtimeEnabled?: boolean;
 }
 
 export interface PricingConfig {
@@ -85,6 +88,8 @@ export interface PricingConfig {
   // Order-level fees
   despachoCost: number; // flat fee per order, e.g. 15000
   instalacionDefault: number; // default suggestion, e.g. 50000
+  // Machine list — editable by superadmin
+  machines: string[];
 }
 
 export const initialPricingConfig: PricingConfig = {
@@ -107,6 +112,7 @@ export const initialPricingConfig: PricingConfig = {
   },
   despachoCost: 15000,
   instalacionDefault: 50000,
+  machines: ['Plotter Roland 1', 'Plotter Roland 2', 'Mesa CNC', 'Laminadora', 'Manual'],
 };
 
 export const customers: Customer[] = [

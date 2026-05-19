@@ -12,6 +12,9 @@ import {
   Check,
   RotateCcw,
   Info,
+  Plus,
+  Trash2,
+  Cpu,
 } from "lucide-react";
 import { initialPricingConfig, materials as defaultMaterials, type Material } from "../../data/mockData";
 
@@ -414,6 +417,47 @@ export const PricingConfigModal = ({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Machine list */}
+              <div className="space-y-3 pt-4 border-t border-zinc-800">
+                <label className="text-sm font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                  <Cpu size={14} /> Máquinas de Producción
+                </label>
+                <p className="text-[11px] text-zinc-500">
+                  Lista usada para asignar máquinas a órdenes en producción.
+                </p>
+                <div className="space-y-2">
+                  {formData.machines.map((machine, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={machine}
+                        onChange={(e) => {
+                          const updated = [...formData.machines];
+                          updated[idx] = e.target.value;
+                          setFormData((prev) => ({ ...prev, machines: updated }));
+                        }}
+                        className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-xl focus:ring-1 focus:ring-white outline-none text-white text-sm font-mono"
+                      />
+                      <button
+                        onClick={() => {
+                          const updated = formData.machines.filter((_, i) => i !== idx);
+                          setFormData((prev) => ({ ...prev, machines: updated }));
+                        }}
+                        className="p-2 text-zinc-600 hover:text-red-400 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setFormData((prev) => ({ ...prev, machines: [...prev.machines, ''] }))}
+                  className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white transition-colors font-medium"
+                >
+                  <Plus size={13} /> Agregar máquina
+                </button>
               </div>
             </div>
           )}

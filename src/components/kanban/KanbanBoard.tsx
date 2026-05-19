@@ -24,13 +24,14 @@ import { toast } from 'sonner';
 import { useStore, type UserRole } from '../../store/useStore';
 import { cn } from '../../lib/utils';
 import { formatCLP } from '../../lib/formatters';
-import { Inbox, Sparkles, Settings, CheckCircle2, Box, Truck, Receipt, Search, Plus } from 'lucide-react';
+import { Inbox, Sparkles, Settings, CheckCircle2, Box, Truck, Receipt, Search, Plus, CalendarDays } from 'lucide-react';
 import type { Order, Customer, Material } from '../../data/mockData';
 import { OrderCard } from './OrderCard';
 import { SkeletonCard } from '../ui/Skeleton';
 import { AICotizadorModal } from '../modals/AICotizadorModal';
 import { PricingConfigModal } from '../modals/PricingConfigModal';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
+import { ProductionCalendar } from '../calendar/ProductionCalendar';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -136,6 +137,7 @@ export function KanbanBoard() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -301,6 +303,20 @@ export function KanbanBoard() {
               </button>
             )}
 
+            {/* Calendar toggle — admin, superadmin, operations */}
+            {(currentUser.role === 'admin' || currentUser.role === 'superadmin' || currentUser.role === 'operations') && (
+              <button
+                onClick={() => setShowCalendar((v) => !v)}
+                className={cn(
+                  'p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 rounded-lg',
+                  showCalendar ? 'text-zinc-900 bg-zinc-100' : 'text-zinc-400 hover:text-zinc-900'
+                )}
+                title="Calendario de producción"
+              >
+                <CalendarDays size={18} />
+              </button>
+            )}
+
             {/* Config */}
             {currentUser.role === 'superadmin' && (
               <button
@@ -350,8 +366,15 @@ export function KanbanBoard() {
         </div>
       </header>
 
+      {/* Calendar view */}
+      {showCalendar && (
+        <div className="flex-1 overflow-hidden">
+          <ProductionCalendar onOrderClick={(id) => setSelectedOrderId(id)} />
+        </div>
+      )}
+
       {/* Board */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
+      <div className={cn('flex-1 overflow-x-auto overflow-y-hidden p-6', showCalendar && 'hidden')}>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}

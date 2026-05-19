@@ -28,7 +28,10 @@ interface AppState {
   updateFileStatus: (orderId: string, status: Order['fileStatus']) => void;
   updateOrderItemPrice: (orderId: string, itemIndex: number, unitPrice: number) => void;
   updateOperationsChecklist: (orderId: string, checklist: boolean[]) => void;
-  
+  updateMachineAssignment: (orderId: string, machine: string) => void;
+  updateManHours: (orderId: string, hours: number) => void;
+  updateOvertimeEnabled: (orderId: string, enabled: boolean) => void;
+
   // Reset
   resetStore: () => void;
 }
@@ -88,6 +91,27 @@ export const useStore = create<AppState>()(
           ),
         })),
 
+      updateMachineAssignment: (orderId, machine) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id !== orderId ? o : { ...o, machineAssignment: machine }
+          ),
+        })),
+
+      updateManHours: (orderId, hours) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id !== orderId ? o : { ...o, manHours: hours }
+          ),
+        })),
+
+      updateOvertimeEnabled: (orderId, enabled) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id !== orderId ? o : { ...o, overtimeEnabled: enabled }
+          ),
+        })),
+
       resetStore: () => set({
         currentUser: { role: 'admin', id: 'admin1' },
         orders: initialOrders,
@@ -98,10 +122,10 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'viu-manager-storage',
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown, version: number) => {
-        if (version < 4) {
-          // Material interface changed (pricePerUnit → supplier slots, globalMargin added)
+        if (version < 5) {
+          // PricingConfig.machines added; Order gets machineAssignment/manHours/overtimeEnabled
           return {
             currentUser: { role: 'admin', id: 'admin1' },
             orders: initialOrders,
