@@ -4,13 +4,16 @@ import { useStore } from '../../store/useStore';
 import { formatCLP } from '../../lib/formatters';
 import {
   X, Upload, Sparkles, ArrowRight, ArrowLeft, Loader2,
-  AlertCircle, Trash2, Plus, Info, CheckCircle, ChevronDown,
+  AlertCircle, Trash2, Plus, Info, CheckCircle, ChevronDown, FileSpreadsheet,
 } from 'lucide-react';
-import { extractOrderItems } from '../../lib/geminiService';
+import { extractOrderItems, findMatchingCustomer } from '../../lib/geminiService';
 import { calculateItemPrice, calculateOrderQuote } from '../../lib/quoteEngine';
+import { excelToText, isSpreadsheetFile } from '../../lib/excelParser';
 import type { ExtractedItem } from '../../lib/geminiService';
-import type { OrderItem } from '../../data/mockData';
+import type { OrderItem, Material } from '../../data/mockData';
 import { SkeletonTableRow } from '../ui/Skeleton';
+import { NewClientPrompt } from './NewClientPrompt';
+import { UnknownMaterialPrompt } from './UnknownMaterialPrompt';
 
 // All valid finishing options (must match geminiService prompt + PricingConfig keys)
 const ALL_FINISHINGS = [
@@ -64,7 +67,7 @@ function mapExtractedToOrderItem(e: ExtractedItem): OrderItem {
 }
 
 export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => {
-  const { addOrder, customers, materials, pricingConfig } = useStore();
+  const { addOrder, addCustomer, addMaterial, customers, materials, pricingConfig } = useStore();
 
   const [step, setStep] = useState<StepType>('input');
   const [emailText, setEmailText] = useState('');
@@ -82,6 +85,10 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
 
   // Success
   const [createdCampaignName, setCreatedCampaignName] = useState('');
+
+  // New client / unknown material detection prompts
+  const [pendingClientName, setPendingClientName] = useState<string | null>(null);
+  const [unknownMaterialQueue, setUnknownMaterialQueue] = useState<string[]>([]);
 
   // Finishing popover open state per row index
   const [finishingOpen, setFinishingOpen] = useState<number | null>(null);
@@ -125,18 +132,45 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
   };
   const removeFile = (i: number) => setFiles(prev => prev.filter((_, idx) => idx !== i));
 
+  const spreadsheetFiles = files.filter(isSpreadsheetFile);
+  const imageFiles = files.filter(f => !isSpreadsheetFile(f));
+
   // --- Analysis ---
   const handleAnalyze = async () => {
-    if (!selectedCustomerId) { setError('Selecciona un cliente antes de analizar.'); return; }
     if (!emailText.trim() && files.length === 0) return;
     setError(null);
     setStep('processing');
-    setProcessingLabel('Extrayendo ítems...');
+    setProcessingLabel('Leyendo archivos...');
 
     try {
-      const result = await extractOrderItems(emailText, files, materials);
+      // Convert spreadsheets to text before sending to Gemini
+      let spreadsheetText: string | undefined;
+      if (spreadsheetFiles.length > 0) {
+        const texts = await Promise.all(spreadsheetFiles.map(excelToText));
+        spreadsheetText = texts.join('\n\n');
+      }
+
+      setProcessingLabel('Extrayendo ítems con IA...');
+      const result = await extractOrderItems(emailText, imageFiles, materials, spreadsheetText);
       setProcessingLabel('Calculando precios...');
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 300));
+
+      // ── Client detection ───────────────────────────────────────────────────
+      if (result.clientName && !selectedCustomerId) {
+        const match = findMatchingCustomer(result.clientName, customers);
+        if (match) {
+          // Auto-select the matched client
+          setSelectedCustomerId(match.id);
+        } else {
+          // Prompt user to create or link
+          setPendingClientName(result.clientName);
+        }
+      }
+
+      // ── Unknown material detection ─────────────────────────────────────────
+      if (result.unknownMaterials && result.unknownMaterials.length > 0) {
+        setUnknownMaterialQueue(result.unknownMaterials.filter(Boolean));
+      }
 
       const orderItems = result.items.map(mapExtractedToOrderItem);
       const quote = calculateOrderQuote(orderItems, materials, pricingConfig);
@@ -281,6 +315,8 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
     setFileStatus('Amarillo');
     setRequiresInstallation(false);
     setFinishingOpen(null);
+    setPendingClientName(null);
+    setUnknownMaterialQueue([]);
   };
 
   const currentStepIdx = STEP_ORDER.indexOf(step);
@@ -341,14 +377,14 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
               {/* Customer selector */}
               <div>
                 <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5 block">
-                  Cliente <span className="text-red-500">*</span>
+                  Cliente <span className="text-zinc-400 font-normal normal-case">(la IA puede detectarlo automáticamente)</span>
                 </label>
                 <select
                   value={selectedCustomerId}
                   onChange={e => { setSelectedCustomerId(e.target.value); setError(null); }}
                   className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-400 focus-visible:ring-2 focus-visible:ring-zinc-900 transition-all text-zinc-900 dark:text-white"
                 >
-                  <option value="">Seleccionar cliente...</option>
+                  <option value="">Detectar automáticamente...</option>
                   {customers.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
@@ -379,23 +415,26 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
                     onDrop={handleDrop}
                     onDragOver={e => e.preventDefault()}
                   >
-                    <input type="file" multiple className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleFileChange} accept="image/*,application/pdf" />
+                    <input type="file" multiple className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleFileChange} accept="image/*,application/pdf,.xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" />
                     {files.length === 0 ? (
                       <>
                         <div className="w-12 h-12 bg-white dark:bg-zinc-800 rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
                           <Upload className="text-zinc-400" size={20} />
                         </div>
                         <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium">Arrastra archivos aquí</p>
-                        <p className="text-zinc-400 dark:text-zinc-600 text-xs mt-1">PDF, JPG, PNG</p>
+                        <p className="text-zinc-400 dark:text-zinc-600 text-xs mt-1">PDF, JPG, PNG, Excel, CSV</p>
                       </>
                     ) : (
                       <div className="w-full h-full p-4 overflow-y-auto">
                         <p className="text-center text-zinc-400 text-xs mb-3">{files.length} archivo(s)</p>
                         <div className="space-y-1.5">
                           {files.map((f, i) => (
-                            <div key={i} className="flex items-center justify-between p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 text-xs">
-                              <span className="truncate max-w-[180px] text-zinc-700 dark:text-zinc-300">{f.name}</span>
-                              <button onClick={e => { e.stopPropagation(); e.preventDefault(); removeFile(i); }} className="text-zinc-400 hover:text-red-500 ml-2">
+                            <div key={i} className={`flex items-center justify-between p-2 rounded-lg border text-xs ${isSpreadsheetFile(f) ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700'}`}>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                {isSpreadsheetFile(f) && <FileSpreadsheet size={11} className="text-emerald-600 shrink-0" />}
+                                <span className="truncate max-w-[160px] text-zinc-700 dark:text-zinc-300">{f.name}</span>
+                              </div>
+                              <button onClick={e => { e.stopPropagation(); e.preventDefault(); removeFile(i); }} className="text-zinc-400 hover:text-red-500 ml-2 shrink-0">
                                 <X size={12} />
                               </button>
                             </div>
@@ -697,6 +736,57 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
           )}
         </div>
 
+        {/* ── Client detection prompt ── */}
+        {pendingClientName && (
+          <NewClientPrompt
+            detectedName={pendingClientName}
+            existingCustomers={customers}
+            onCreateNew={(customerData) => {
+              const id = crypto.randomUUID();
+              addCustomer({ ...customerData, id });
+              setSelectedCustomerId(id);
+              setPendingClientName(null);
+              toast.success(`Cliente "${customerData.name}" creado`);
+            }}
+            onLinkExisting={(customerId) => {
+              setSelectedCustomerId(customerId);
+              setPendingClientName(null);
+            }}
+            onDismiss={() => setPendingClientName(null)}
+          />
+        )}
+
+        {/* ── Unknown material prompt (queue, shown one at a time) ── */}
+        {unknownMaterialQueue.length > 0 && !pendingClientName && (
+          <UnknownMaterialPrompt
+            unknownName={unknownMaterialQueue[0]}
+            remaining={unknownMaterialQueue.length - 1}
+            existingMaterials={materials}
+            onAddNew={(name, type) => {
+              const newMat: Material = {
+                id: crypto.randomUUID(),
+                name,
+                type,
+                stock: 0,
+                unit: type === 'Flexible' ? 'm' : 'planchas',
+                supplier1Price: 0,
+                supplier2Price: 0,
+                supplier3Price: 0,
+                activeSupplier: 1,
+                ...(type === 'Rígido' ? { sheetWidth: 120, sheetHeight: 240 } : {}),
+              };
+              addMaterial(newMat);
+              setUnknownMaterialQueue((q) => q.slice(1));
+              toast.success(`Material "${name}" agregado al catálogo`);
+            }}
+            onMapExisting={(_materialId) => {
+              // Mapping is informational — just dismiss this unknown
+              setUnknownMaterialQueue((q) => q.slice(1));
+            }}
+            onSkip={() => setUnknownMaterialQueue((q) => q.slice(1))}
+          />
+        )}
+
         {/* Footer */}
         {(step === 'input' || step === 'review') && (
           <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex justify-between items-center shrink-0">
@@ -721,7 +811,7 @@ export const AICotizadorModal = ({ isOpen, onClose }: AICotizadorModalProps) => 
                 <div /> {/* spacer */}
                 <button
                   onClick={handleAnalyze}
-                  disabled={!selectedCustomerId || (!emailText.trim() && files.length === 0)}
+                  disabled={!emailText.trim() && files.length === 0}
                   className="flex items-center gap-2 px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
                 >
                   Analizar con Gemini <Sparkles size={15} />

@@ -9,6 +9,7 @@ import { RoleManagerModal } from './components/auth/RoleManagerModal';
 import { Sidebar } from './components/layout/Sidebar';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
 import { ProductionCalendar } from './components/calendar/ProductionCalendar';
+import { AuditPanel } from './components/layout/AuditPanel';
 import { ApprovalPage } from './components/portal/ApprovalPage';
 import { ClientPortalView } from './components/portal/ClientPortalView';
 import type { UserRole } from './store/useStore';
@@ -18,7 +19,7 @@ function App() {
   const { switchUser } = useStore();
 
   const [approvalOrderId, setApprovalOrderId] = useState<string | null>(null);
-  const [view, setView] = useState<'board' | 'calendar' | 'csv'>('board');
+  const [view, setView] = useState<'board' | 'calendar' | 'csv' | 'audit'>('board');
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isRoleManagerOpen, setIsRoleManagerOpen] = useState(false);
@@ -103,6 +104,8 @@ function App() {
       <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {view === 'calendar' ? (
           <ProductionCalendar onOrderClick={(id) => { setSelectedOrderId(id); setView('board'); }} />
+        ) : view === 'audit' ? (
+          <AuditPanel />
         ) : (
           <KanbanBoard
             view={view}

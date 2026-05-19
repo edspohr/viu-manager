@@ -3,9 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
   X, ChevronRight, ChevronDown, Sparkles,
-  AlertCircle, User, Calendar, Hash, ArrowRight, Cpu, Clock, Zap, Link2, CheckCheck,
+  AlertCircle, User, Calendar, Hash, ArrowRight, Cpu, Clock, Zap, Link2, CheckCheck, History,
 } from 'lucide-react';
-import { useStore } from '../../store/useStore';
+import { useStore, type PriceChangeLog, type StatusChangeLog } from '../../store/useStore';
 import { formatCLP, formatDate } from '../../lib/formatters';
 import type { Order } from '../../data/mockData';
 
@@ -66,6 +66,7 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
     orders, customers, materials, pricingConfig, currentUser,
     updateOrderStatus, updateFileStatus, updateOrderItemPrice, updateOperationsChecklist,
     updateMachineAssignment, updateManHours, updateOvertimeEnabled, updateOrderExternal,
+    priceChangeLogs, statusChangeLogs,
   } = useStore();
 
   const order = orders.find(o => o.id === orderId) ?? null;
@@ -453,6 +454,61 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
     </div>
   );
 
+  const renderHistory = () => {
+    const orderPriceLogs = priceChangeLogs.filter((l) => l.orderId === order.id);
+    const orderStatusLogs = statusChangeLogs.filter((l) => l.orderId === order.id);
+
+    type HistoryEntry = { ts: string; label: React.ReactNode };
+    const entries: HistoryEntry[] = [
+      ...orderPriceLogs.map((l: PriceChangeLog) => ({
+        ts: l.timestamp,
+        label: (
+          <span className="text-xs text-zinc-500">
+            Precio ítem #{l.itemIndex + 1}:{' '}
+            <span className="font-mono line-through text-zinc-400">{formatCLP(l.oldPrice)}</span>
+            {' → '}
+            <span className="font-mono font-semibold text-amber-700">{formatCLP(l.newPrice)}</span>
+            <span className="text-zinc-400"> · {l.changedBy}</span>
+          </span>
+        ),
+      })),
+      ...orderStatusLogs.map((l: StatusChangeLog) => ({
+        ts: l.timestamp,
+        label: (
+          <span className="text-xs text-zinc-500">
+            Estado: <span className="font-medium text-zinc-700">{l.fromStatus || '—'}</span>
+            {' → '}
+            <span className="font-medium text-blue-700">{l.toStatus}</span>
+            <span className="text-zinc-400"> · {l.changedBy}</span>
+          </span>
+        ),
+      })),
+    ].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+
+    if (entries.length === 0) return null;
+
+    return (
+      <div className="px-6 pb-6">
+        <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider py-4 border-b border-zinc-100 mb-3 flex items-center gap-1.5">
+          <History size={11} /> Historial
+        </h3>
+        <div className="space-y-2">
+          {entries.map((e, idx) => (
+            <div key={idx} className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-zinc-300 mt-1.5 shrink-0" />
+              <div>
+                {e.label}
+                <p className="text-[10px] text-zinc-400 mt-0.5">
+                  {new Date(e.ts).toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderSidebar = () => (
     <div className="border-l border-zinc-100 p-6 space-y-6 bg-zinc-50/50">
 
@@ -679,6 +735,7 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
                 {renderItemsTable()}
                 {(isOperations || isAdmin) && renderOperationsChecklist()}
                 {renderDescription()}
+                {isAdmin && renderHistory()}
               </>
             )}
           </div>

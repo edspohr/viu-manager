@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, CalendarDays, Download, Settings, LogOut,
-  Sparkles, Users, ChevronDown, Shield,
+  Sparkles, Users, ChevronDown, Shield, History,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { AppUser } from '../../lib/useAuth';
@@ -12,8 +12,8 @@ const VIU_LOGO = '/viu-logo.png';
 
 interface SidebarProps {
   user: AppUser;
-  view: 'board' | 'calendar' | 'csv';
-  onViewChange: (v: 'board' | 'calendar' | 'csv') => void;
+  view: 'board' | 'calendar' | 'csv' | 'audit';
+  onViewChange: (v: 'board' | 'calendar' | 'csv' | 'audit') => void;
   onNewQuote: () => void;
   onPricingConfig: () => void;
   onRoleManager: () => void;
@@ -24,6 +24,10 @@ const NAV_ITEMS = [
   { id: 'board' as const, label: 'Órdenes', icon: LayoutDashboard },
   { id: 'calendar' as const, label: 'Calendario', icon: CalendarDays },
   { id: 'csv' as const, label: 'Exportar CSV', icon: Download },
+] as const;
+
+const ADMIN_NAV_ITEMS = [
+  { id: 'audit' as const, label: 'Historial', icon: History },
 ] as const;
 
 const ROLE_BADGE: Record<UserRole | 'pending', { label: string; cls: string }> = {
@@ -107,12 +111,31 @@ export function Sidebar({
           );
         })}
 
-        {/* Divider */}
+        {/* Admin section */}
         {(isSuperadmin || isAdmin) && (
           <div className="pt-3 mt-3 border-t border-zinc-800/60">
             <p className="px-3 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">
               Administración
             </p>
+
+            {/* Audit trail — both admin and superadmin */}
+            {ADMIN_NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              const active = view === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onViewChange(item.id)}
+                  className={cn(
+                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all',
+                    active ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                  )}
+                >
+                  <Icon size={16} className={active ? 'text-amber-400' : ''} />
+                  {item.label}
+                </button>
+              );
+            })}
 
             {isSuperadmin && (
               <button
@@ -134,7 +157,6 @@ export function Sidebar({
               </button>
             )}
 
-            {/* Superadmin badge */}
             {isSuperadmin && (
               <div className="mt-2 flex items-center gap-1.5 px-3 py-1">
                 <Shield size={11} className="text-purple-400 shrink-0" />

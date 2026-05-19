@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { CheckCircle, AlertCircle, PenLine, RotateCcw } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { formatCLP } from '../../lib/formatters';
+import { QuotePDFButton } from './QuotePDF';
 
 // Chilean RUN format: 12.345.678-9 or 12.345.678-K
 const RUN_REGEX = /^\d{1,2}\.\d{3}\.\d{3}-[\dkK]$/;
@@ -204,6 +205,9 @@ export function ApprovalPage({ orderId }: ApprovalPageProps) {
           <div className="text-center space-y-1">
             <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Total a aprobar</p>
             <p className="text-4xl font-bold text-zinc-900 font-mono">{formatCLP(displayTotal)}</p>
+            <div className="flex justify-center mt-3">
+              <QuotePDFButton order={order} customer={customer ?? null} />
+            </div>
             {order.deliveryDate && (
               <p className="text-sm text-zinc-400">
                 Entrega estimada:{' '}
