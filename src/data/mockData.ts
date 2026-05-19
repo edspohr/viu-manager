@@ -61,6 +61,10 @@ export interface Order {
   machineAssignment?: string;
   manHours?: number;
   overtimeEnabled?: boolean;
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  approvalRun?: string;       // Chilean RUN, format XX.XXX.XXX-X
+  approvalTimestamp?: string;
+  approvalSignatureDataUrl?: string;
 }
 
 export interface PricingConfig {

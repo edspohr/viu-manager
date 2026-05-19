@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
   X, ChevronRight, ChevronDown, Sparkles,
-  AlertCircle, User, Calendar, Hash, ArrowRight, Cpu, Clock, Zap,
+  AlertCircle, User, Calendar, Hash, ArrowRight, Cpu, Clock, Zap, Link2, CheckCheck,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { formatCLP, formatDate } from '../../lib/formatters';
@@ -73,6 +73,7 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
 
   // Local state for inline price editing (committed to store on blur)
   const [localPrices, setLocalPrices] = useState<Record<number, string>>({});
+  const [linkCopied, setLinkCopied] = useState(false);
   // Expanded breakdown rows
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
@@ -83,6 +84,7 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
     if (orderId) {
       setLocalPrices({});
       setExpandedRows(new Set());
+      setLinkCopied(false);
     }
   }
 
@@ -497,6 +499,41 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
             <span>{nextStatus}</span>
             <ArrowRight size={14} className="text-zinc-400 group-hover:text-zinc-700 transition-colors" />
           </button>
+        </div>
+      )}
+
+      {/* Approval link — admin/superadmin, Por Aprobar orders */}
+      {isAdmin && order.status === 'Por Aprobar' && (
+        <div>
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+            Link de Aprobación
+          </p>
+          <button
+            onClick={() => {
+              const url = `${window.location.origin}${window.location.pathname}?order=${order.id}`;
+              navigator.clipboard.writeText(url).then(() => {
+                setLinkCopied(true);
+                toast.success('Link copiado al portapapeles');
+                setTimeout(() => setLinkCopied(false), 3000);
+              });
+            }}
+            className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 ${
+              linkCopied
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : 'bg-white border-zinc-200 text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50'
+            }`}
+          >
+            {linkCopied ? <CheckCheck size={14} /> : <Link2 size={14} />}
+            {linkCopied ? '¡Copiado!' : 'Copiar link de aprobación'}
+          </button>
+        </div>
+      )}
+
+      {/* Approval status badge — when already approved */}
+      {order.approvalStatus === 'approved' && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-700">
+          <CheckCheck size={13} />
+          Aprobado — RUN {order.approvalRun}
         </div>
       )}
 

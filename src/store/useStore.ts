@@ -31,6 +31,7 @@ interface AppState {
   updateMachineAssignment: (orderId: string, machine: string) => void;
   updateManHours: (orderId: string, hours: number) => void;
   updateOvertimeEnabled: (orderId: string, enabled: boolean) => void;
+  approveOrder: (orderId: string, run: string, signatureDataUrl: string) => void;
 
   // Reset
   resetStore: () => void;
@@ -112,6 +113,21 @@ export const useStore = create<AppState>()(
           ),
         })),
 
+      approveOrder: (orderId, run, signatureDataUrl) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id !== orderId
+              ? o
+              : {
+                  ...o,
+                  approvalStatus: 'approved',
+                  approvalRun: run,
+                  approvalTimestamp: new Date().toISOString(),
+                  approvalSignatureDataUrl: signatureDataUrl,
+                }
+          ),
+        })),
+
       resetStore: () => set({
         currentUser: { role: 'admin', id: 'admin1' },
         orders: initialOrders,
@@ -122,10 +138,10 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'viu-manager-storage',
-      version: 5,
+      version: 6,
       migrate: (persistedState: unknown, version: number) => {
-        if (version < 5) {
-          // PricingConfig.machines added; Order gets machineAssignment/manHours/overtimeEnabled
+        if (version < 6) {
+          // Order gets approval fields; PricingConfig.machines added in v5
           return {
             currentUser: { role: 'admin', id: 'admin1' },
             orders: initialOrders,
