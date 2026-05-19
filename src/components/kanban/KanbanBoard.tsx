@@ -21,10 +21,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { useStore, type UserRole } from '../../store/useStore';
+import { useStore } from '../../store/useStore';
 import { cn } from '../../lib/utils';
 import { formatCLP } from '../../lib/formatters';
-import { Inbox, Sparkles, Settings, CheckCircle2, Box, Truck, Receipt, Search, Plus, CalendarDays, Download } from 'lucide-react';
+import { Inbox, CheckCircle2, Box, Truck, Receipt, Search, Plus } from 'lucide-react';
 import type { Order, Customer, Material } from '../../data/mockData';
 import { OrderCard } from './OrderCard';
 import { SkeletonCard } from '../ui/Skeleton';
@@ -57,13 +57,6 @@ const COLUMN_GHOST_STYLE: Record<string, string> = {
   'En Producción': 'border-blue-300   bg-blue-50/60',
   'Despacho':      'border-purple-300 bg-purple-50/60',
   'Terminado':     'border-emerald-300 bg-emerald-50/60',
-};
-
-const ROLE_LABELS: Record<UserRole, string> = {
-  admin: 'Admin',
-  superadmin: 'Superadmin',
-  operations: 'Operaciones',
-  client: 'Cliente',
 };
 
 const dropAnimation: DropAnimation = {
@@ -125,24 +118,39 @@ function SortableItem({
 
 // ─── Main Board ───────────────────────────────────────────────────────────────
 
-export function KanbanBoard() {
+export interface KanbanBoardProps {
+  view: 'board' | 'calendar' | 'csv';
+  isAIModalOpen: boolean;
+  onAIModalClose: () => void;
+  isConfigModalOpen: boolean;
+  onConfigModalClose: () => void;
+  isRoleManagerOpen?: boolean;
+  onRoleManagerClose?: () => void;
+}
+
+export function KanbanBoard({
+  view,
+  isAIModalOpen,
+  onAIModalClose,
+  isConfigModalOpen,
+  onConfigModalClose,
+}: KanbanBoardProps) {
   const {
     orders, customers, materials,
-    updateOrderStatus, currentUser, switchUser, exportOrdersCSV,
+    updateOrderStatus, currentUser, exportOrdersCSV,
   } = useStore();
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
   const [justDroppedId, setJustDroppedId] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [showCsvPanel, setShowCsvPanel] = useState(false);
   const [csvFrom, setCsvFrom] = useState('');
   const [csvTo, setCsvTo] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+
+  const showCalendar = view === 'calendar';
+  const showCsvPanel = view === 'csv';
 
   // Simulate initial load (from localStorage via Zustand hydration)
   useEffect(() => {
@@ -262,160 +270,68 @@ export function KanbanBoard() {
 
   const activeOrder = orders.find((o) => o.id === activeId);
 
-  // ── AI Modal open handler ─────────────────────────────────────────────────
-  const handleOpenAIModal = useCallback(() => setIsAIModalOpen(true), []);
+  // unused but kept for empty-state button reference
+  const handleOpenAIModal = useCallback(() => {}, []);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-screen bg-zinc-50 flex flex-col text-zinc-900 font-sans">
+    <div className="flex-1 min-h-0 bg-zinc-50 flex flex-col text-zinc-900 font-sans">
 
-      {/* Header */}
-      <header className="h-auto border-b border-zinc-200 bg-white px-6 py-3 flex flex-col gap-2 shrink-0">
-        <div className="flex items-center justify-between">
-          {/* Brand */}
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-zinc-900 text-white flex items-center justify-center font-bold text-sm">
-              V
-            </div>
-            <span className="font-bold tracking-tight text-lg">VIU Manager</span>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-3">
-            {/* Search */}
-            <div className="relative hidden md:block">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar campaña o cliente..."
-                className="pl-8 pr-4 py-1.5 text-sm bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-300 focus-visible:ring-2 focus-visible:ring-zinc-900 w-56 transition-all focus:w-72 placeholder:text-zinc-400"
-              />
-            </div>
-
-            {/* AI Cotizador */}
-            {(currentUser.role === 'admin' || currentUser.role === 'superadmin') && (
-              <button
-                onClick={handleOpenAIModal}
-                className="px-4 py-1.5 bg-zinc-900 text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center gap-2 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
-              >
-                <Sparkles size={14} />
-                <span className="hidden sm:inline">Nueva Cotización</span>
-              </button>
-            )}
-
-            {/* Calendar toggle — admin, superadmin, operations */}
-            {(currentUser.role === 'admin' || currentUser.role === 'superadmin' || currentUser.role === 'operations') && (
-              <button
-                onClick={() => setShowCalendar((v) => !v)}
-                className={cn(
-                  'p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 rounded-lg',
-                  showCalendar ? 'text-zinc-900 bg-zinc-100' : 'text-zinc-400 hover:text-zinc-900'
-                )}
-                title="Calendario de producción"
-              >
-                <CalendarDays size={18} />
-              </button>
-            )}
-
-            {/* CSV export — admin/superadmin */}
-            {(currentUser.role === 'admin' || currentUser.role === 'superadmin') && (
-              <button
-                onClick={() => setShowCsvPanel((v) => !v)}
-                className={cn(
-                  'p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 rounded-lg',
-                  showCsvPanel ? 'text-zinc-900 bg-zinc-100' : 'text-zinc-400 hover:text-zinc-900'
-                )}
-                title="Exportar CSV"
-              >
-                <Download size={18} />
-              </button>
-            )}
-
-            {/* Config */}
-            {currentUser.role === 'superadmin' && (
-              <button
-                onClick={() => setIsConfigModalOpen(true)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 rounded-lg"
-              >
-                <Settings size={18} />
-              </button>
-            )}
-
-            {/* Role switcher */}
-            <div className="flex items-center gap-2">
-              <select
-                value={currentUser.role}
-                onChange={(e) => switchUser(e.target.value as UserRole)}
-                className="text-xs bg-zinc-100 border border-zinc-200 rounded-lg px-2 py-1.5 text-zinc-600 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 font-medium"
-              >
-                {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => (
-                  <option key={role} value={role}>
-                    {ROLE_LABELS[role]}
-                  </option>
-                ))}
-              </select>
-              <div className="w-7 h-7 rounded-full bg-zinc-200 border border-zinc-300 flex items-center justify-center text-xs font-bold text-zinc-600">
-                {currentUser.role[0].toUpperCase()}
-              </div>
-            </div>
-          </div>
+      {/* Top bar — search + portfolio */}
+      <div className="h-14 border-b border-zinc-200 bg-white px-6 flex items-center gap-4 shrink-0">
+        <div className="relative flex-1 max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar campaña o cliente..."
+            className="w-full pl-9 pr-4 py-1.5 text-sm bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-400 transition-all placeholder:text-zinc-400"
+          />
         </div>
-
-        {/* Sub-row: portfolio value + search results */}
-        <div className="flex items-center gap-4 text-xs text-zinc-400">
+        {searchQuery.trim() && (
+          <span className="text-xs text-zinc-500">
+            {displayOrders.length} resultado{displayOrders.length !== 1 ? 's' : ''}
+          </span>
+        )}
+        <div className="ml-auto text-xs text-zinc-400">
           {activePortfolio > 0 && (
-            <span>
-              Cartera activa:{' '}
-              <span className="font-mono font-semibold text-zinc-600">
-                {formatCLP(activePortfolio)}
-              </span>
-            </span>
-          )}
-          {/* CSV export panel */}
-          {showCsvPanel && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && (
-            <div className="flex items-center gap-3 py-2 px-1 border-t border-zinc-100 mt-1">
-              <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Exportar órdenes</span>
-              <input
-                type="date"
-                value={csvFrom}
-                onChange={(e) => setCsvFrom(e.target.value)}
-                className="px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-700"
-              />
-              <span className="text-zinc-400 text-xs">→</span>
-              <input
-                type="date"
-                value={csvTo}
-                onChange={(e) => setCsvTo(e.target.value)}
-                className="px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-700"
-              />
-              <button
-                onClick={() => {
-                  if (!csvFrom || !csvTo) {
-                    toast.error('Selecciona un rango de fechas');
-                    return;
-                  }
-                  exportOrdersCSV(csvFrom, csvTo);
-                  toast.success('CSV generado');
-                }}
-                disabled={!csvFrom || !csvTo}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 text-white text-xs font-medium rounded-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-              >
-                <Download size={12} /> Descargar
-              </button>
-            </div>
-          )}
-
-          {searchQuery.trim() && (
-            <span className="text-zinc-500">
-              {displayOrders.length} resultado{displayOrders.length !== 1 ? 's' : ''} para{' '}
-              <span className="font-medium">"{searchQuery}"</span>
-            </span>
+            <span>Cartera activa: <span className="font-mono font-semibold text-zinc-600">{formatCLP(activePortfolio)}</span></span>
           )}
         </div>
-      </header>
+      </div>
+
+      {/* CSV Panel */}
+      {showCsvPanel && (
+        <div className="border-b border-zinc-200 bg-white px-6 py-3 flex items-center gap-3">
+          <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Exportar órdenes</span>
+          <input
+            type="date"
+            value={csvFrom}
+            onChange={(e) => setCsvFrom(e.target.value)}
+            className="px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-700"
+          />
+          <span className="text-zinc-400 text-xs">→</span>
+          <input
+            type="date"
+            value={csvTo}
+            onChange={(e) => setCsvTo(e.target.value)}
+            className="px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-700"
+          />
+          <button
+            onClick={() => {
+              if (!csvFrom || !csvTo) { toast.error('Selecciona un rango de fechas'); return; }
+              exportOrdersCSV(csvFrom, csvTo);
+              toast.success('CSV generado');
+            }}
+            disabled={!csvFrom || !csvTo}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 text-white text-xs font-medium rounded-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+          >
+            Descargar
+          </button>
+        </div>
+      )}
 
       {/* Calendar view */}
       {showCalendar && (
@@ -542,8 +458,8 @@ export function KanbanBoard() {
       </div>
 
       {/* Modals */}
-      <AICotizadorModal isOpen={isAIModalOpen} onClose={() => setIsAIModalOpen(false)} />
-      <PricingConfigModal isOpen={isConfigModalOpen} onClose={() => setIsConfigModalOpen(false)} />
+      <AICotizadorModal isOpen={isAIModalOpen} onClose={onAIModalClose} />
+      <PricingConfigModal isOpen={isConfigModalOpen} onClose={onConfigModalClose} />
       <OrderDetailModal orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} />
     </div>
   );

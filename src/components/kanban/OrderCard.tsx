@@ -45,10 +45,14 @@ export const OrderCard = React.memo(function OrderCard({
       transition={{ duration: 0.4, type: 'tween' }}
       onClick={onClick}
       className={cn(
-        'group bg-white p-4 rounded-xl border border-zinc-200 shadow-sm',
-        'hover:shadow-lg hover:border-zinc-300 transition-all duration-150 cursor-pointer relative',
+        'group bg-white p-4 rounded-xl border shadow-sm',
+        'hover:shadow-lg transition-all duration-150 cursor-pointer relative',
         'border-l-4',
-        hasDebt ? 'border-l-amber-400' : 'border-l-zinc-200'
+        order.isExternal
+          ? 'border-dashed border-amber-300 border-l-amber-400 hover:border-amber-400'
+          : hasDebt
+          ? 'border-zinc-200 border-l-amber-400 hover:border-zinc-300'
+          : 'border-zinc-200 border-l-zinc-200 hover:border-zinc-300'
       )}
     >
       {/* Top row: campaign name + status dot (+ AI icon) */}
@@ -57,6 +61,11 @@ export const OrderCard = React.memo(function OrderCard({
           {order.campaignName}
         </h4>
         <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+          {order.isExternal && (
+            <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[9px] font-bold leading-none tracking-wide">
+              EXTERNO
+            </span>
+          )}
           {order.aiGenerated && (
             <Sparkles size={11} className="text-zinc-400" />
           )}

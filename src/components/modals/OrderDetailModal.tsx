@@ -65,7 +65,7 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
   const {
     orders, customers, materials, pricingConfig, currentUser,
     updateOrderStatus, updateFileStatus, updateOrderItemPrice, updateOperationsChecklist,
-    updateMachineAssignment, updateManHours, updateOvertimeEnabled,
+    updateMachineAssignment, updateManHours, updateOvertimeEnabled, updateOrderExternal,
   } = useStore();
 
   const order = orders.find(o => o.id === orderId) ?? null;
@@ -534,6 +534,36 @@ export function OrderDetailModal({ orderId, onClose }: OrderDetailModalProps) {
         <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-700">
           <CheckCheck size={13} />
           Aprobado — RUN {order.approvalRun}
+        </div>
+      )}
+
+      {/* External order toggle — admin/superadmin only */}
+      {isAdmin && (
+        <div>
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Producción Externa</p>
+          <label className="flex items-center gap-2.5 px-3 py-2 bg-white border border-zinc-200 rounded-xl cursor-pointer hover:bg-zinc-50 transition-colors">
+            <input
+              type="checkbox"
+              checked={order.isExternal ?? false}
+              onChange={(e) => updateOrderExternal(order.id, e.target.checked, order.externalSupplier ?? '')}
+              className="w-4 h-4 rounded accent-amber-500"
+            />
+            <span className="text-sm text-zinc-700">Externo</span>
+            {order.isExternal && (
+              <span className="ml-auto px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[9px] font-bold tracking-wide">
+                EXTERNO
+              </span>
+            )}
+          </label>
+          {order.isExternal && (
+            <input
+              type="text"
+              value={order.externalSupplier ?? ''}
+              onChange={(e) => updateOrderExternal(order.id, true, e.target.value)}
+              placeholder="Proveedor externo..."
+              className="mt-2 w-full px-3 py-2 bg-white border border-zinc-200 rounded-xl text-sm text-zinc-800 placeholder:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-colors"
+            />
+          )}
         </div>
       )}
 

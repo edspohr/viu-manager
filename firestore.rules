@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users collection — authenticated users can read/write their own doc
+    // Superadmins can read/write all user docs (for role management)
+    match /users/{userId} {
+      // Any authenticated user can read their own doc
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Authenticated users can create their own doc (first sign-in)
+      allow create: if request.auth != null && request.auth.uid == userId;
+
+      // Superadmins can read and update any user doc (role assignment)
+      allow read, update: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin';
+    }
+  }
+}

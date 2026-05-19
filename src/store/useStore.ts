@@ -40,7 +40,13 @@ interface AppState {
 
   // Material Actions
   updateMaterials: (materials: Material[]) => void;
+  addMaterial: (material: Material) => void;
+  deleteMaterial: (materialId: string) => void;
+
+  // Customer Actions
   addCustomer: (customer: Customer) => void;
+  updateCustomer: (customer: Customer) => void;
+  deleteCustomer: (customerId: string) => void;
 
   // Order Actions
   addOrder: (order: Order) => void;
@@ -52,6 +58,7 @@ interface AppState {
   updateManHours: (orderId: string, hours: number) => void;
   updateOvertimeEnabled: (orderId: string, enabled: boolean) => void;
   approveOrder: (orderId: string, run: string, signatureDataUrl: string) => void;
+  updateOrderExternal: (orderId: string, isExternal: boolean, externalSupplier: string) => void;
 
   // Export
   exportOrdersCSV: (fromDate: string, toDate: string) => void;
@@ -87,8 +94,24 @@ export const useStore = create<AppState>()(
 
       updateMaterials: (materials) => set({ materials }),
 
+      addMaterial: (material) => set((state) => ({
+        materials: [...state.materials, material],
+      })),
+
+      deleteMaterial: (materialId) => set((state) => ({
+        materials: state.materials.filter((m) => m.id !== materialId),
+      })),
+
       addCustomer: (customer) => set((state) => ({
         customers: [...state.customers, customer],
+      })),
+
+      updateCustomer: (customer) => set((state) => ({
+        customers: state.customers.map((c) => (c.id === customer.id ? customer : c)),
+      })),
+
+      deleteCustomer: (customerId) => set((state) => ({
+        customers: state.customers.filter((c) => c.id !== customerId),
       })),
 
       addOrder: (order) => set((state) => ({
@@ -180,6 +203,13 @@ export const useStore = create<AppState>()(
                   approvalTimestamp: new Date().toISOString(),
                   approvalSignatureDataUrl: signatureDataUrl,
                 }
+          ),
+        })),
+
+      updateOrderExternal: (orderId, isExternal, externalSupplier) =>
+        set((state) => ({
+          orders: state.orders.map((o) =>
+            o.id !== orderId ? o : { ...o, isExternal, externalSupplier }
           ),
         })),
 

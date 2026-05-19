@@ -65,6 +65,8 @@ export interface Order {
   approvalRun?: string;       // Chilean RUN, format XX.XXX.XXX-X
   approvalTimestamp?: string;
   approvalSignatureDataUrl?: string;
+  isExternal?: boolean;
+  externalSupplier?: string;
 }
 
 export interface PricingConfig {
@@ -119,7 +121,122 @@ export const initialPricingConfig: PricingConfig = {
   machines: ['Plotter Roland 1', 'Plotter Roland 2', 'Mesa CNC', 'Laminadora', 'Manual'],
 };
 
-// §4.3 — All mock/test data purged before production deploy
+// §4.3 — No test orders or test customers. Materials are production defaults.
 export const customers: Customer[] = [];
-export const materials: Material[] = [];
+
 export const initialOrders: Order[] = [];
+
+// Default material catalog — prices editable by admin/superadmin in PricingConfigModal
+export const materials: Material[] = [
+  {
+    id: "m1",
+    name: "Foam 5MM (Fomex)",
+    type: "Rígido",
+    stock: 0,
+    unit: "planchas",
+    supplier1Price: 15000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+    sheetWidth: 120,
+    sheetHeight: 240,
+    minPrice: 1500,
+  },
+  {
+    id: "m2",
+    name: "Sintra 3MM (Trovicel)",
+    type: "Rígido",
+    stock: 0,
+    unit: "planchas",
+    supplier1Price: 12000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+    sheetWidth: 120,
+    sheetHeight: 240,
+    minPrice: 1500,
+  },
+  {
+    id: "m3",
+    name: "Sintra 5MM (PVC)",
+    type: "Rígido",
+    stock: 0,
+    unit: "planchas",
+    supplier1Price: 18000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+    sheetWidth: 120,
+    sheetHeight: 240,
+    minPrice: 2000,
+  },
+  {
+    id: "m4",
+    name: "PP Alveolar 6MM",
+    type: "Rígido",
+    stock: 0,
+    unit: "planchas",
+    supplier1Price: 8000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+    sheetWidth: 120,
+    sheetHeight: 240,
+    minPrice: 1200,
+  },
+  {
+    id: "m5",
+    name: "Adhesivo Laminado Matte",
+    type: "Flexible",
+    stock: 0,
+    unit: "m",
+    supplier1Price: 9000,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+  },
+  {
+    id: "m6",
+    name: "Adhesivo Black Out Matte",
+    type: "Flexible",
+    stock: 0,
+    unit: "m",
+    supplier1Price: 7770,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+  },
+  {
+    id: "m7",
+    name: "Vinilo Blanco Plotter",
+    type: "Flexible",
+    stock: 0,
+    unit: "m",
+    supplier1Price: 10500,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+  },
+  {
+    id: "m8",
+    name: "Tela PVC",
+    type: "Flexible",
+    stock: 0,
+    unit: "m",
+    supplier1Price: 6800,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+  },
+  {
+    id: "m9",
+    name: "Floorgraphic Laminado Piso",
+    type: "Flexible",
+    stock: 0,
+    unit: "m",
+    supplier1Price: 11500,
+    supplier2Price: 0,
+    supplier3Price: 0,
+    activeSupplier: 1,
+  },
+];
