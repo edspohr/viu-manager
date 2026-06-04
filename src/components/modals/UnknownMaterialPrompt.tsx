@@ -8,7 +8,7 @@ interface UnknownMaterialPromptProps {
   unknownName: string;
   remaining: number;        // how many more unknown materials after this one
   existingMaterials: Material[];
-  onAddNew: (name: string, type: 'Rígido' | 'Flexible') => void;
+  onAddNew: (name: string, type: 'Rígido' | 'Flexible', initialCost: number) => void;
   onMapExisting: (materialId: string) => void;
   onSkip: () => void;
 }
@@ -19,7 +19,10 @@ export function UnknownMaterialPrompt({
   const [mode, setMode] = useState<'choose' | 'add' | 'map'>('choose');
   const [name, setName] = useState(unknownName);
   const [matType, setMatType] = useState<'Rígido' | 'Flexible'>('Flexible');
+  const [initialCost, setInitialCost] = useState(0);
   const [mapId, setMapId] = useState('');
+
+  const canAdd = name.trim().length > 0 && initialCost > 0;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/60 backdrop-blur-sm p-4">
@@ -117,16 +120,38 @@ export function UnknownMaterialPrompt({
                   ))}
                 </div>
               </div>
-              <p className="text-xs text-zinc-400">
-                Se agregará con precio = 0. Configura el precio en Administración → Configuración.
-              </p>
+              {/* Initial cost — required, blocks save at $0 */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">
+                  Costo inicial (CLP) <span className="text-red-400">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-sm">$</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={initialCost || ''}
+                    onChange={(e) => setInitialCost(parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                    className={cn(
+                      'w-full pl-7 pr-3 py-2.5 border rounded-xl text-sm font-mono focus:outline-none focus:ring-2 transition-colors',
+                      initialCost <= 0
+                        ? 'border-red-300 focus:ring-red-400'
+                        : 'border-zinc-200 focus:ring-zinc-900'
+                    )}
+                  />
+                </div>
+                {initialCost <= 0 && (
+                  <p className="text-[11px] text-red-500 mt-1">El costo inicial debe ser mayor a $0</p>
+                )}
+              </div>
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setMode('choose')} className="flex-1 py-2.5 border border-zinc-200 rounded-xl text-sm text-zinc-500 hover:border-zinc-400 transition-colors">
                   Atrás
                 </button>
                 <button
-                  onClick={() => name.trim() && onAddNew(name.trim(), matType)}
-                  disabled={!name.trim()}
+                  onClick={() => canAdd && onAddNew(name.trim(), matType, initialCost)}
+                  disabled={!canAdd}
                   className="flex-1 py-2.5 bg-zinc-900 text-white rounded-xl text-sm font-medium hover:opacity-90 disabled:opacity-40 transition-all"
                 >
                   Agregar material

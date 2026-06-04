@@ -4,6 +4,14 @@ export interface Customer {
   type: "Complejo" | "Recurrente" | "Esporádico";
   contact: string;
   debt: number;
+  // Extended fields (v8)
+  rut: string;
+  projectManager: string;
+  address: string;
+  segment: "A" | "B" | "C";
+  clientCode: string; // 3-letter code for quotation numbers, e.g. "SBX"
+  initialCorrelative: number; // starting sequence number, default 1
+  orderCount: number; // incremented on each new order, default 0
 }
 
 export interface Material {
@@ -34,46 +42,63 @@ export interface OrderItem {
   subtotal: number;
   calculationBreakdown: {
     baseCost: number;
+    laborCost: number;
     finishingMultiplier: number;
     finishingAddons: number;
+    segmentMultiplier: number;
     planchasUsed?: number;
   };
 }
+
+export type QuotationStatus =
+  | "Borrador"
+  | "Pendiente Aprobación"
+  | "Aprobada Internamente"
+  | "Enviada al Cliente"
+  | "Aceptada"
+  | "Rechazada";
 
 export interface Order {
   id: string;
   customerId: string;
   campaignName: string;
   description: string;
-  status:
-    | "Solicitud"
-    | "Por Aprobar"
-    | "En Producción"
-    | "Despacho"
-    | "Terminado";
+  status: QuotationStatus;
   items: OrderItem[];
   totalAmount: number;
   deliveryDate: string;
   createdAt: string;
-  fileStatus: "Rojo" | "Amarillo" | "Verde";
-  operationsChecklist?: boolean[]; // 5-item checklist, persisted
   aiGenerated?: boolean;
-  machineAssignment?: string;
-  manHours?: number;
-  overtimeEnabled?: boolean;
+  // Internal approval (by superadmin)
+  internalApproval?: {
+    approvedBy: string;
+    approvedAt: string;
+  };
+  sentToClientAt?: string;
+  rejectionReason?: string;
+  // Client acceptance (via public link)
   approvalStatus?: 'pending' | 'approved' | 'rejected';
   approvalRun?: string;       // Chilean RUN, format XX.XXX.XXX-X
   approvalTimestamp?: string;
   approvalSignatureDataUrl?: string;
-  isExternal?: boolean;
-  externalSupplier?: string;
+  // Quotation metadata
+  quotationCode?: string;       // e.g. "SBX028"
+  isSplitQuote?: boolean;
+  splitPartA?: OrderItem[];
+  splitPartB?: OrderItem[];
+  requiresInstallation?: boolean;
+  installationFee?: number;
+  eventName?: string;
+  weekendSurcharge?: boolean;
 }
 
 export interface PricingConfig {
-  // Rigid material calculation
-  rigidMargin: number; // markup on top of raw plancha cost, e.g. 0.4 = 40%
-  // Flexible material global margin (applied after all other calculations)
-  globalMargin: number; // e.g. 0.35 = 35%
+  // Segment-based multipliers (replaces rigidMargin / globalMargin)
+  segmentMultipliers: { A: number; B: number; C: number };
+  // Labor pricing
+  laborHourRate: number;       // CLP per hour, default 15000
+  overtimeMultiplier: number;  // default 1.5 (+50% to labor)
+  weekendMultiplier: number;   // default 1.25 (+25% to labor)
   // Finishing multipliers (applied to base unit price)
   finishingMultipliers: {
     "Corte Recto": number; // 1.0 (baseline)
@@ -92,15 +117,22 @@ export interface PricingConfig {
     [key: string]: number;
   };
   // Order-level fees
-  despachoCost: number; // flat fee per order, e.g. 15000
-  instalacionDefault: number; // default suggestion, e.g. 50000
-  // Machine list — editable by superadmin
-  machines: string[];
+  despachoCost: number;        // flat fee per order, e.g. 15000
+  instalacionDefault: number;  // default suggestion, e.g. 50000
+  // Delivery lead time (SuperAdmin configurable)
+  deliveryLeadDays: number;    // default 7
+  // Company info for PDF generation
+  empresaRut: string;
+  empresaPhone: string;
+  empresaEmail: string;
+  bankDetails: string;
 }
 
 export const initialPricingConfig: PricingConfig = {
-  rigidMargin: 0.4,
-  globalMargin: 0.35,
+  segmentMultipliers: { A: 2.2, B: 2.0, C: 1.8 },
+  laborHourRate: 15000,
+  overtimeMultiplier: 1.5,
+  weekendMultiplier: 1.25,
   finishingMultipliers: {
     "Corte Recto": 1.0,
     Troquelado: 1.5,
@@ -118,7 +150,11 @@ export const initialPricingConfig: PricingConfig = {
   },
   despachoCost: 15000,
   instalacionDefault: 50000,
-  machines: ['Plotter Roland 1', 'Plotter Roland 2', 'Mesa CNC', 'Laminadora', 'Manual'],
+  deliveryLeadDays: 7,
+  empresaRut: '',
+  empresaPhone: '',
+  empresaEmail: '',
+  bankDetails: '',
 };
 
 // §4.3 — No test orders or test customers. Materials are production defaults.

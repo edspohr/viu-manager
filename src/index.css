@@ -3,19 +3,34 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply bg-zinc-50 text-zinc-900 font-sans antialiased;
-    font-feature-settings: 'rlig' 1, 'calt' 1;
+  html {
+    font-feature-settings: 'cv11', 'ss01', 'ss03', 'rlig' 1, 'calt' 1;
+    -webkit-text-size-adjust: 100%;
   }
 
+  body {
+    @apply text-ink font-sans antialiased;
+    background-color: #FAFAF8;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(255, 199, 44, 0.06), transparent),
+      radial-gradient(ellipse 60% 50% at 80% 100%, rgba(255, 199, 44, 0.04), transparent);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background-color: rgba(255, 199, 44, 0.35);
+    color: #18181b;
+  }
+
+  /* Subtle scrollbars */
   * {
     scrollbar-width: thin;
     scrollbar-color: #d4d4d8 transparent;
   }
 
   *::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
   }
 
   *::-webkit-scrollbar-track {
@@ -25,5 +40,68 @@
   *::-webkit-scrollbar-thumb {
     background-color: #d4d4d8;
     border-radius: 999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #a1a1aa;
+  }
+
+  /* Focus ring base */
+  *:focus-visible {
+    outline: none;
+  }
+
+  /* Better number input — hide spinners */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  /* Brand button — VIU yellow primary action */
+  .btn-viu {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-ink bg-viu-500 hover:bg-viu-400 active:bg-viu-600 transition-all duration-150 ease-out-expo shadow-viu-soft hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  /* Dark primary — for secondary CTAs */
+  .btn-dark {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-zinc-900 hover:bg-zinc-800 active:bg-zinc-950 transition-all duration-150 ease-out-expo shadow-soft hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  /* Ghost button */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-zinc-700 hover:bg-zinc-100 active:bg-zinc-200 transition-colors duration-150;
+  }
+
+  /* Outline button */
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-zinc-700 bg-white border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  /* Form input — consistent across app */
+  .input {
+    @apply w-full px-3.5 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm text-ink placeholder:text-zinc-400 transition-all duration-150;
+  }
+  .input:focus {
+    @apply outline-none border-viu-500 ring-4 ring-viu-500/15;
+  }
+
+  /* Card surfaces */
+  .card {
+    @apply bg-white border border-zinc-200/80 rounded-2xl shadow-card;
+  }
+
+  .card-hover {
+    @apply transition-all duration-200 ease-out-expo hover:border-zinc-300 hover:shadow-raised;
+  }
+
+  /* Section label — micro caps */
+  .label-micro {
+    @apply text-[10px] font-bold text-zinc-500 uppercase tracking-[0.08em];
   }
 }

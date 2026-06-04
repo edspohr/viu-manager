@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
 import { useAuth } from './lib/useAuth';
@@ -6,12 +5,12 @@ import { useStore } from './store/useStore';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { PendingScreen } from './components/auth/PendingScreen';
 import { RoleManagerModal } from './components/auth/RoleManagerModal';
-import { Sidebar } from './components/layout/Sidebar';
-import { KanbanBoard } from './components/kanban/KanbanBoard';
-import { ProductionCalendar } from './components/calendar/ProductionCalendar';
-import { AuditPanel } from './components/layout/AuditPanel';
+import { AppShell, type AppView } from './components/layout/AppShell';
+import { QuotationsList } from './components/quotations/QuotationsList';
+import { QuotationDetail } from './components/quotations/QuotationDetail';
+import { SettingsPage } from './components/settings/SettingsPage';
+import { AIQuoteWizard } from './components/wizard/AIQuoteWizard';
 import { ApprovalPage } from './components/portal/ApprovalPage';
-import { ClientPortalView } from './components/portal/ClientPortalView';
 import type { UserRole } from './store/useStore';
 
 function App() {
@@ -19,11 +18,10 @@ function App() {
   const { switchUser } = useStore();
 
   const [approvalOrderId, setApprovalOrderId] = useState<string | null>(null);
-  const [view, setView] = useState<'board' | 'calendar' | 'csv' | 'audit'>('board');
-  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [view, setView] = useState<AppView>('quotations');
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isRoleManagerOpen, setIsRoleManagerOpen] = useState(false);
-  const [_selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.remove('dark');
@@ -32,14 +30,17 @@ function App() {
     if (orderId) setApprovalOrderId(orderId);
   }, []);
 
-  // Sync Firebase auth user into Zustand store role
+  // Sync Firebase auth role into Zustand store
   useEffect(() => {
     if (auth.user && auth.user.role !== 'pending') {
-      switchUser(auth.user.role as UserRole, auth.user.uid);
+      // Only admin / superadmin reach the app now
+      if (auth.user.role === 'admin' || auth.user.role === 'superadmin') {
+        switchUser(auth.user.role as UserRole, auth.user.uid);
+      }
     }
   }, [auth.user, switchUser]);
 
-  // ── Standalone approval page ───────────────────────────────────────────────
+  // ── Standalone approval page (public link) ────────────────────────────────
   if (approvalOrderId) {
     return (
       <>
@@ -52,8 +53,8 @@ function App() {
   // ── Auth loading ───────────────────────────────────────────────────────────
   if (auth.loading) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-zinc-700 border-t-amber-400 rounded-full animate-spin" />
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-zinc-200 border-t-zinc-900 rounded-full animate-spin" />
       </div>
     );
   }
@@ -68,8 +69,8 @@ function App() {
     );
   }
 
-  // ── Pending role ───────────────────────────────────────────────────────────
-  if (auth.user.role === 'pending') {
+  // ── Pending or deprecated role ─────────────────────────────────────────────
+  if (auth.user.role !== 'admin' && auth.user.role !== 'superadmin') {
     return (
       <>
         <PendingScreen user={auth.user} onSignOut={auth.signOut} />
@@ -78,44 +79,33 @@ function App() {
     );
   }
 
-  // ── Client view ───────────────────────────────────────────────────────────
-  if (auth.user.role === 'client') {
-    return (
-      <div className="min-h-screen bg-zinc-50 text-zinc-900 font-sans">
-        <ClientPortalView />
-        <Toaster position="bottom-right" theme="light" richColors />
-      </div>
-    );
-  }
-
-  // ── Main app (admin / superadmin / operations) ─────────────────────────────
+  // ── Main app ───────────────────────────────────────────────────────────────
   return (
-    <div className="h-screen flex bg-zinc-50 text-zinc-900 font-sans overflow-hidden">
-      <Sidebar
-        user={auth.user}
-        view={view}
-        onViewChange={setView}
-        onNewQuote={() => setIsAIModalOpen(true)}
-        onPricingConfig={() => setIsConfigModalOpen(true)}
-        onRoleManager={() => setIsRoleManagerOpen(true)}
-        onSignOut={auth.signOut}
-      />
+    <AppShell
+      user={auth.user}
+      view={view}
+      onViewChange={(v) => { setView(v); setSelectedOrderId(null); }}
+      onRoleManager={() => setIsRoleManagerOpen(true)}
+      onSignOut={auth.signOut}
+    >
+      {view === 'quotations' && selectedOrderId ? (
+        <QuotationDetail
+          orderId={selectedOrderId}
+          onBack={() => setSelectedOrderId(null)}
+        />
+      ) : view === 'quotations' ? (
+        <QuotationsList
+          onOpenQuote={setSelectedOrderId}
+          onNewQuote={() => setIsWizardOpen(true)}
+        />
+      ) : (
+        <SettingsPage />
+      )}
 
-      <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        {view === 'calendar' ? (
-          <ProductionCalendar onOrderClick={(id) => { setSelectedOrderId(id); setView('board'); }} />
-        ) : view === 'audit' ? (
-          <AuditPanel />
-        ) : (
-          <KanbanBoard
-            view={view}
-            isAIModalOpen={isAIModalOpen}
-            onAIModalClose={() => setIsAIModalOpen(false)}
-            isConfigModalOpen={isConfigModalOpen}
-            onConfigModalClose={() => setIsConfigModalOpen(false)}
-          />
-        )}
-      </main>
+      <AIQuoteWizard
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+      />
 
       <RoleManagerModal
         isOpen={isRoleManagerOpen}
@@ -123,7 +113,7 @@ function App() {
       />
 
       <Toaster position="bottom-right" theme="light" richColors />
-    </div>
+    </AppShell>
   );
 }
 

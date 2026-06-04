@@ -7,19 +7,15 @@ import { X, Users, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 
-const ROLES: (UserRole | 'pending')[] = ['superadmin', 'admin', 'operations', 'client', 'pending'];
+const ROLES: (UserRole | 'pending')[] = ['superadmin', 'admin', 'pending'];
 const ROLE_LABELS: Record<UserRole | 'pending', string> = {
   superadmin: 'Superadmin',
   admin: 'Admin',
-  operations: 'Operaciones',
-  client: 'Cliente',
   pending: 'Pendiente',
 };
 const ROLE_COLORS: Record<UserRole | 'pending', string> = {
   superadmin: 'bg-purple-100 text-purple-700 border-purple-200',
   admin: 'bg-blue-100 text-blue-700 border-blue-200',
-  operations: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  client: 'bg-zinc-100 text-zinc-600 border-zinc-200',
   pending: 'bg-amber-100 text-amber-700 border-amber-200',
 };
 
@@ -93,7 +89,7 @@ export function RoleManagerModal({ isOpen, onClose }: RoleManagerModalProps) {
           ) : (
             users
               .sort((a, b) => {
-                const order = ['superadmin', 'admin', 'operations', 'client', 'pending'];
+                const order = ['superadmin', 'admin', 'pending'];
                 return order.indexOf(a.role) - order.indexOf(b.role);
               })
               .map((u) => (

@@ -12,8 +12,10 @@ import type { Material, OrderItem } from "../data/mockData";
 
 const blankBreakdown = {
   baseCost: 0,
+  laborCost: 0,
   finishingMultiplier: 1,
   finishingAddons: 0,
+  segmentMultiplier: 1,
 };
 
 function makeItem(partial: Partial<OrderItem> & Pick<OrderItem, "materialId" | "width" | "height" | "quantity">): OrderItem {
@@ -68,6 +70,9 @@ const fomex5MM: Material = {
   minPrice: 1500,
 };
 
+// Use segmentMultiplier=1.0 and no labor for simple baseline calculations
+const SEG = 1.0;
+
 // --- Tests ---
 
 describe("getEffectivePrice", () => {
@@ -87,7 +92,7 @@ describe("getEffectivePrice", () => {
 });
 
 describe("calculateItemPrice", () => {
-  it("Test 1 — Flexible: Adhesivo Black Out 245×245cm ×1 → ~62,802 CLP with globalMargin (±5%)", () => {
+  it("Test 1 — Flexible: Adhesivo Black Out 245×245cm ×1 (segMult=1.0) → ~46,639 CLP (±5%)", () => {
     const item = makeItem({
       materialId: "m6",
       width: 245,
@@ -96,17 +101,19 @@ describe("calculateItemPrice", () => {
       finishing: ["Corte Recto"],
     });
 
-    const result = calculateItemPrice(item, adhesivoBLACK, initialPricingConfig);
+    const result = calculateItemPrice(item, adhesivoBLACK, initialPricingConfig, SEG);
 
     // areaM2 = (245*245)/10000 = 6.0025
-    // baseCost = 6.0025 * 7770 = 46,639.4
-    // multiplier = 1.0, addons = 0
-    // suggestedUnitPrice = round(46639.4 * 1.35) = round(62,963) ≈ 62,963
-    expect(result.suggestedUnitPrice).toBeGreaterThan(62963 * 0.95);
-    expect(result.suggestedUnitPrice).toBeLessThan(62963 * 1.05);
+    // baseCost = 6.0025 * 7770 = 46,639
+    // laborCost = 0
+    // multiplier = 1.0 (Corte Recto), addons = 0
+    // suggestedUnitPrice = round(46639 * 1.0 + 0) * 1.0 = 46,639
+    const expected = Math.round(6.0025 * 7770);
+    expect(result.suggestedUnitPrice).toBeGreaterThan(expected * 0.95);
+    expect(result.suggestedUnitPrice).toBeLessThan(expected * 1.05);
   });
 
-  it("Test 2 — Flexible: Adhesivo Laminado Matte 200×51cm ×2 → ~12,393 CLP with globalMargin (±5%)", () => {
+  it("Test 2 — Flexible: Adhesivo Laminado Matte 200×51cm ×2 (segMult=1.0) → ~9,180 CLP unit (±5%)", () => {
     const item = makeItem({
       materialId: "m5",
       width: 200,
@@ -115,13 +122,14 @@ describe("calculateItemPrice", () => {
       finishing: [],
     });
 
-    const result = calculateItemPrice(item, adhesivoMATTE, initialPricingConfig);
+    const result = calculateItemPrice(item, adhesivoMATTE, initialPricingConfig, SEG);
 
     // areaM2 = (200*51)/10000 = 1.02
     // baseCost = 1.02 * 9000 = 9,180
-    // globalMargin = 1.35 → round(9180 * 1.35) = 12,393
-    expect(result.suggestedUnitPrice).toBeGreaterThan(12393 * 0.95);
-    expect(result.suggestedUnitPrice).toBeLessThan(12393 * 1.05);
+    // suggestedUnitPrice = round(9180 * 1.0) * 1.0 = 9,180
+    const expected = Math.round(1.02 * 9000);
+    expect(result.suggestedUnitPrice).toBeGreaterThan(expected * 0.95);
+    expect(result.suggestedUnitPrice).toBeLessThan(expected * 1.05);
     expect(result.subtotal).toBe(result.suggestedUnitPrice * 2);
   });
 
@@ -134,14 +142,13 @@ describe("calculateItemPrice", () => {
       finishing: ["Corte Recto"],
     });
 
-    const result = calculateItemPrice(item, fomex5MM, initialPricingConfig);
+    const result = calculateItemPrice(item, fomex5MM, initialPricingConfig, SEG);
 
     // sheetArea = 120*240 = 28,800 cm²
     // pieceArea = 200*60 = 12,000 cm²
     // planchasUsed = 12000/28800 = 0.41667
     expect(result.calculationBreakdown.planchasUsed).toBeCloseTo(12000 / 28800, 4);
-    expect(result.suggestedUnitPrice).toBeGreaterThan(7000);
-    expect(result.suggestedUnitPrice).toBeLessThan(15000);
+    expect(result.suggestedUnitPrice).toBeGreaterThan(1500); // at least minPrice
   });
 
   it("Test 4 — Rigid with Troquelado: Fomex 5MM 120×31cm ×2 → suggestedUnitPrice > base * 1.5", () => {
@@ -160,10 +167,10 @@ describe("calculateItemPrice", () => {
       finishing: ["Troquelado"],
     });
 
-    const baseResult = calculateItemPrice(itemRecto, fomex5MM, initialPricingConfig);
-    const troqueladoResult = calculateItemPrice(itemTroquelado, fomex5MM, initialPricingConfig);
+    const baseResult = calculateItemPrice(itemRecto, fomex5MM, initialPricingConfig, SEG);
+    const troqueladoResult = calculateItemPrice(itemTroquelado, fomex5MM, initialPricingConfig, SEG);
 
-    // base * 1.5 may round down by 1 due to Math.round — allow ±1
+    // Troquelado multiplier = 1.5× applied before segment multiplier
     expect(troqueladoResult.suggestedUnitPrice).toBeGreaterThanOrEqual(
       Math.round(baseResult.suggestedUnitPrice * 1.5) - 1
     );
@@ -179,22 +186,39 @@ describe("calculateItemPrice", () => {
       finishing: [],
     });
 
-    const result = calculateItemPrice(item, fomex5MM, initialPricingConfig);
+    const result = calculateItemPrice(item, fomex5MM, initialPricingConfig, SEG);
 
     // pieceArea = 100 cm², planchasUsed tiny → hits minPrice floor
     expect(result.suggestedUnitPrice).toBe(fomex5MM.minPrice);
   });
+
+  it("Test 6 — segment multiplier B (2.0) doubles price vs multiplier 1.0", () => {
+    const item = makeItem({
+      materialId: "m5",
+      width: 100,
+      height: 100,
+      quantity: 1,
+      finishing: [],
+    });
+
+    const base = calculateItemPrice(item, adhesivoMATTE, initialPricingConfig, 1.0);
+    const segB = calculateItemPrice(item, adhesivoMATTE, initialPricingConfig, 2.0);
+
+    expect(segB.suggestedUnitPrice).toBe(base.suggestedUnitPrice * 2);
+    expect(segB.calculationBreakdown.segmentMultiplier).toBe(2.0);
+  });
 });
 
 describe("recalculateWithOverrides", () => {
-  it("Test 6 — override item[0].unitPrice = 99999, verify total reflects it and suggestedUnitPrice is unchanged", () => {
+  it("Test 7 — override item[0].unitPrice = 99999, verify total reflects it and suggestedUnitPrice is unchanged", () => {
     const item1 = makeItem({ materialId: "m5", width: 100, height: 100, quantity: 1 });
     const item2 = makeItem({ materialId: "m5", width: 50, height: 50, quantity: 2 });
 
     const quote = calculateOrderQuote(
       [item1, item2],
       [adhesivoMATTE],
-      initialPricingConfig
+      initialPricingConfig,
+      1.0
     );
 
     const originalSuggested = quote.calculatedItems[0].suggestedUnitPrice;

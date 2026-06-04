@@ -1,12 +1,9 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, User, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { Mail, Lock, User, Eye, EyeOff, AlertCircle, Sparkles } from 'lucide-react';
 import type { useAuth } from '../../lib/useAuth';
 type AuthState = ReturnType<typeof useAuth>;
 import { cn } from '../../lib/utils';
-
-// Inline the logo as SVG/img data
-const VIU_LOGO = '/viu-logo.png';
 
 interface LoginScreenProps {
   auth: AuthState;
@@ -50,148 +47,188 @@ export function LoginScreen({ auth }: LoginScreenProps) {
     : null;
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
-      {/* Background grain */}
-      <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,_#27272a_0%,_#09090b_70%)] pointer-events-none" />
+    <div className="min-h-screen flex font-sans">
+      {/* Left: Brand hero (hidden on mobile) */}
+      <div className="hidden lg:flex lg:w-1/2 relative bg-ink overflow-hidden">
+        {/* Ambient gradient */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,199,44,0.18),transparent_55%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_80%,rgba(255,199,44,0.08),transparent_55%)]" />
 
-      <motion.div
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-        className="relative w-full max-w-sm"
-      >
-        {/* Logo + brand */}
-        <div className="flex flex-col items-center mb-8 gap-3">
-          <img
-            src={VIU_LOGO}
-            alt="VIU Print"
-            className="w-16 h-16 rounded-2xl shadow-lg"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
-          />
-          <div className="text-center">
-            <h1 className="text-white font-bold text-2xl tracking-tight">VIU Manager</h1>
-            <p className="text-zinc-500 text-sm mt-0.5">Portal interno VIU Print</p>
-          </div>
-        </div>
+        {/* Grain noise */}
+        <div className="absolute inset-0 opacity-[0.025]" style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+        }} />
 
-        {/* Card */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
-          {/* Tab switcher */}
-          <div className="flex border-b border-zinc-800">
-            {(['login', 'register'] as Mode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={cn(
-                  'flex-1 py-3.5 text-sm font-medium transition-colors',
-                  mode === m
-                    ? 'text-white bg-zinc-800'
-                    : 'text-zinc-500 hover:text-zinc-300'
-                )}
-              >
-                {m === 'login' ? 'Iniciar sesión' : 'Registrarse'}
-              </button>
-            ))}
-          </div>
+        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
+          {/* Logo top */}
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            className="flex items-center gap-3"
+          >
+            <img src="/viu-logo.png" alt="VIU" className="w-11 h-11 rounded-xl shadow-lg" />
+            <div className="text-white font-bold text-xl tracking-tight">VIU<span className="text-viu-500">.</span></div>
+          </motion.div>
 
-          <div className="p-6 space-y-4">
-            {/* Google button */}
-            <button
-              onClick={handleGoogle}
-              disabled={submitting}
-              className="w-full flex items-center justify-center gap-3 py-2.5 bg-white text-zinc-900 rounded-xl font-medium text-sm hover:bg-zinc-100 disabled:opacity-60 transition-colors shadow-sm"
-            >
-              <GoogleIcon />
-              Continuar con Google
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="h-px flex-1 bg-zinc-800" />
-              <span className="text-zinc-600 text-xs">o con correo</span>
-              <div className="h-px flex-1 bg-zinc-800" />
+          {/* Hero copy */}
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6 max-w-md"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-xs text-zinc-300 backdrop-blur-sm">
+              <Sparkles size={12} className="text-viu-500" />
+              <span>Cotizaciones con IA</span>
             </div>
+            <h1 className="text-5xl font-bold tracking-tightest text-white leading-[1.05]">
+              Cotiza más rápido,<br />
+              <span className="text-viu-500">vende más</span>.
+            </h1>
+            <p className="text-zinc-400 text-base leading-relaxed">
+              Sube los documentos del cliente y deja que la IA arme la cotización por ti.
+              Aprueba, envía y firma — todo en un solo lugar.
+            </p>
+          </motion.div>
 
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <AnimatePresence>
-                {mode === 'register' && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="overflow-hidden"
-                  >
-                    <FieldInput
-                      icon={<User size={15} />}
-                      type="text"
-                      placeholder="Nombre completo"
-                      value={name}
-                      onChange={setName}
-                      required={mode === 'register'}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+          {/* Footer */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.4, delay: 0.4 }}
+            className="text-xs text-zinc-600"
+          >
+            VIU Print Ltda. · Impresión de gran formato
+          </motion.div>
+        </div>
+      </div>
 
-              <FieldInput
-                icon={<Mail size={15} />}
-                type="email"
-                placeholder="Correo electrónico"
-                value={email}
-                onChange={setEmail}
-                required
-              />
+      {/* Right: Form */}
+      <div className="flex-1 flex items-center justify-center p-6 lg:p-12 bg-surface relative">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full max-w-sm"
+        >
+          {/* Mobile-only logo */}
+          <div className="flex lg:hidden flex-col items-center gap-3 mb-8">
+            <img src="/viu-logo.png" alt="VIU" className="w-14 h-14 rounded-2xl shadow-raised" />
+            <div className="text-ink font-bold text-xl tracking-tight">VIU<span className="text-viu-600">.</span></div>
+          </div>
 
-              <div className="relative">
-                <FieldInput
-                  icon={<Lock size={15} />}
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Contraseña"
-                  value={password}
-                  onChange={setPassword}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
-                >
-                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
+          <div className="mb-8">
+            <h2 className="text-h1 text-ink">
+              {mode === 'login' ? 'Bienvenido' : 'Crear cuenta'}
+            </h2>
+            <p className="text-sm text-zinc-500 mt-1.5">
+              {mode === 'login'
+                ? 'Inicia sesión para gestionar tus cotizaciones'
+                : 'Regístrate para acceder al portal interno'}
+            </p>
+          </div>
 
-              {errorMsg && (
+          {/* Google button */}
+          <button
+            onClick={handleGoogle}
+            disabled={submitting}
+            className="w-full flex items-center justify-center gap-3 py-3 bg-white text-ink rounded-xl font-medium text-sm border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 disabled:opacity-60 transition-all duration-150 shadow-soft"
+          >
+            <GoogleIcon />
+            Continuar con Google
+          </button>
+
+          <div className="flex items-center gap-3 my-5">
+            <div className="h-px flex-1 bg-zinc-200" />
+            <span className="text-zinc-400 text-[11px] uppercase tracking-wider font-medium">o con correo</span>
+            <div className="h-px flex-1 bg-zinc-200" />
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <AnimatePresence>
+              {mode === 'register' && (
                 <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center gap-2 px-3 py-2.5 bg-rose-950/60 border border-rose-800 rounded-xl text-rose-400 text-xs"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
                 >
-                  <AlertCircle size={14} className="shrink-0" />
-                  {errorMsg}
+                  <FieldInput
+                    icon={<User size={15} />}
+                    type="text"
+                    placeholder="Nombre completo"
+                    value={name}
+                    onChange={setName}
+                    required={mode === 'register'}
+                  />
                 </motion.div>
               )}
+            </AnimatePresence>
 
+            <FieldInput
+              icon={<Mail size={15} />}
+              type="email"
+              placeholder="Correo electrónico"
+              value={email}
+              onChange={setEmail}
+              required
+            />
+
+            <div className="relative">
+              <FieldInput
+                icon={<Lock size={15} />}
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Contraseña"
+                value={password}
+                onChange={setPassword}
+                required
+              />
               <button
-                type="submit"
-                disabled={submitting}
-                className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 disabled:opacity-60 text-zinc-900 font-semibold rounded-xl text-sm transition-colors shadow-md"
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 transition-colors"
               >
-                {submitting
-                  ? 'Cargando...'
-                  : mode === 'login'
-                  ? 'Iniciar sesión'
-                  : 'Crear cuenta'}
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
-            </form>
-          </div>
-        </div>
+            </div>
 
-        <p className="text-center text-zinc-600 text-xs mt-6">
-          VIU Print · Uso interno exclusivo
-        </p>
-      </motion.div>
+            {errorMsg && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-start gap-2 px-3 py-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs"
+              >
+                <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                <span>{errorMsg}</span>
+              </motion.div>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-3 bg-viu-500 hover:bg-viu-400 active:bg-viu-600 disabled:opacity-60 text-ink font-bold rounded-xl text-sm transition-all duration-150 shadow-viu-soft hover:shadow-md"
+            >
+              {submitting
+                ? 'Cargando...'
+                : mode === 'login'
+                ? 'Iniciar sesión'
+                : 'Crear cuenta'}
+            </button>
+          </form>
+
+          <p className="text-center text-xs text-zinc-500 mt-6">
+            {mode === 'login' ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?'}{' '}
+            <button
+              onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+              className="font-semibold text-ink hover:text-viu-700 transition-colors"
+            >
+              {mode === 'login' ? 'Regístrate' : 'Inicia sesión'}
+            </button>
+          </p>
+        </motion.div>
+      </div>
     </div>
   );
 }
@@ -199,12 +236,7 @@ export function LoginScreen({ auth }: LoginScreenProps) {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function FieldInput({
-  icon,
-  type,
-  placeholder,
-  value,
-  onChange,
-  required,
+  icon, type, placeholder, value, onChange, required,
 }: {
   icon: React.ReactNode;
   type: string;
@@ -215,14 +247,17 @@ function FieldInput({
 }) {
   return (
     <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">{icon}</span>
+      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400">{icon}</span>
       <input
         type={type}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
-        className="w-full pl-9 pr-4 py-2.5 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 transition-colors"
+        className={cn(
+          'w-full pl-10 pr-4 py-3 bg-white border border-zinc-200 rounded-xl text-sm text-ink placeholder:text-zinc-400 transition-all duration-150',
+          'focus:outline-none focus:border-viu-500 focus:ring-4 focus:ring-viu-500/15'
+        )}
       />
     </div>
   );

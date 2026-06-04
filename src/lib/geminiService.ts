@@ -52,7 +52,10 @@ async function callGemini(
   apiKey: string
 ): Promise<GeminiExtractionResult> {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.0-flash',
+    generationConfig: { maxOutputTokens: 8192 } as Record<string, unknown>,
+  });
 
   const result = await model.generateContent([prompt, ...imageParts]);
   const text = result.response.text();
@@ -104,6 +107,7 @@ export async function extractOrderItems(
     : '';
 
   const prompt = `You are an expert estimator for VIU Print, a large-format printing company in Chile.
+IMPORTANT: You MUST extract ALL items listed in the document without any limit. Do NOT truncate or skip any items. If there are 20 items, return all 20. Never stop early.
 Extract ALL print items from the request. For each item return:
 - description: short item name
 - materialId: best match from this catalog (use "unknown" if nothing fits):

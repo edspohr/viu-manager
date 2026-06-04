@@ -7,8 +7,10 @@ export interface CalculatedItem extends OrderItem {
   warning?: string;
   calculationBreakdown: {
     baseCost: number;
+    laborCost: number;
     finishingMultiplier: number;
     finishingAddons: number;
+    segmentMultiplier: number;
     planchasUsed?: number;
   };
 }
@@ -17,6 +19,7 @@ export interface QuoteResult {
   calculatedItems: CalculatedItem[];
   subtotal: number;
   despachoCost: number;
+  installationFee: number;
   totalAmount: number;
 }
 
@@ -53,10 +56,24 @@ export function getEffectivePrice(m: Material): number {
   return m.supplier3Price;
 }
 
+/**
+ * Calculates price for a single order item using the segment-based formula:
+ *   suggestedUnitPrice = Math.round((baseCost + laborCost) * finishingMultiplier + finishingAddons) * segmentMultiplier
+ *
+ * @param item - The order item
+ * @param material - Resolved material (or UNKNOWN_MATERIAL fallback)
+ * @param config - Pricing configuration
+ * @param segmentMultiplier - Customer segment multiplier (A=2.2, B=2.0, C=1.8)
+ * @param laborHoursPerItem - Labor hours allocated to this item (order.manHours / items.length)
+ * @param weekendSurcharge - Whether weekend labor surcharge applies
+ */
 export function calculateItemPrice(
   item: OrderItem,
   material: Material,
-  config: PricingConfig
+  config: PricingConfig,
+  segmentMultiplier: number = 2.0,
+  laborHoursPerItem: number = 0,
+  weekendSurcharge: boolean = false
 ): CalculatedItem {
   // Edge case: quantity <= 0 → default to 1
   const quantity = item.quantity > 0 ? item.quantity : 1;
@@ -72,8 +89,10 @@ export function calculateItemPrice(
       warning: "Medidas incompletas (ancho o alto = 0). Completar antes de cotizar.",
       calculationBreakdown: {
         baseCost: 0,
+        laborCost: 0,
         finishingMultiplier: 1,
         finishingAddons: 0,
+        segmentMultiplier,
       },
     };
   }
@@ -100,73 +119,70 @@ export function calculateItemPrice(
     const areaM2 = (item.width * item.height) / 10000;
     baseCost = safeNum(areaM2 * effectivePrice);
     if (item.doubleSided) baseCost *= 2;
-    // Apply globalMargin to flexible materials
-    let suggestedUnitPrice = Math.round(
-      safeNum(baseCost * finishingMultiplier + finishingAddons) * (1 + config.globalMargin)
-    );
-    suggestedUnitPrice = Math.max(suggestedUnitPrice, material.minPrice ?? 0);
-    const subtotal = safeNum(suggestedUnitPrice * quantity);
-    return {
-      ...item,
-      quantity,
-      suggestedUnitPrice,
-      unitPrice: suggestedUnitPrice,
-      subtotal,
-      calculationBreakdown: {
-        baseCost: safeNum(baseCost),
-        finishingMultiplier: safeNum(finishingMultiplier),
-        finishingAddons: safeNum(finishingAddons),
-      },
-    };
   } else {
-    // Rigid: 120×240 safety perimeter workspace (§3.3)
+    // Rigid: 120×240 safety perimeter workspace
     const sheetArea =
       (material.sheetWidth ?? 120) * (material.sheetHeight ?? 240);
     const pieceArea = item.width * item.height;
     planchasUsed = sheetArea > 0 ? safeNum(pieceArea / sheetArea) : 0;
-    baseCost = safeNum(
-      planchasUsed * effectivePrice * (1 + config.rigidMargin)
-    );
+    baseCost = safeNum(planchasUsed * effectivePrice);
     if (item.doubleSided) baseCost *= 2;
-    let suggestedUnitPrice = Math.round(
-      safeNum(baseCost * finishingMultiplier + finishingAddons)
-    );
-    suggestedUnitPrice = Math.max(suggestedUnitPrice, material.minPrice ?? 0);
-    const subtotal = safeNum(suggestedUnitPrice * quantity);
-    return {
-      ...item,
-      quantity,
-      suggestedUnitPrice,
-      unitPrice: suggestedUnitPrice,
-      subtotal,
-      calculationBreakdown: {
-        baseCost: safeNum(baseCost),
-        finishingMultiplier: safeNum(finishingMultiplier),
-        finishingAddons: safeNum(finishingAddons),
-        planchasUsed: safeNum(planchasUsed),
-      },
-    };
   }
+
+  // Labor cost with optional weekend surcharge
+  const laborRate = config.laborHourRate ?? 15000;
+  const surchargeMultiplier = weekendSurcharge ? (config.weekendMultiplier ?? 1.25) : 1.0;
+  const laborCost = safeNum(laborHoursPerItem * laborRate * surchargeMultiplier);
+
+  // Segment-based pricing formula:
+  // suggestedUnitPrice = round((baseCost + laborCost) * finishingMultiplier + finishingAddons) * segmentMultiplier
+  let suggestedUnitPrice = Math.round(
+    safeNum((baseCost + laborCost) * finishingMultiplier + finishingAddons) * segmentMultiplier
+  );
+  suggestedUnitPrice = Math.max(suggestedUnitPrice, material.minPrice ?? 0);
+  const subtotal = safeNum(suggestedUnitPrice * quantity);
+
+  return {
+    ...item,
+    quantity,
+    suggestedUnitPrice,
+    unitPrice: suggestedUnitPrice,
+    subtotal,
+    calculationBreakdown: {
+      baseCost: safeNum(baseCost),
+      laborCost: safeNum(laborCost),
+      finishingMultiplier: safeNum(finishingMultiplier),
+      finishingAddons: safeNum(finishingAddons),
+      segmentMultiplier,
+      ...(planchasUsed !== undefined ? { planchasUsed: safeNum(planchasUsed) } : {}),
+    },
+  };
 }
 
 export function calculateOrderQuote(
   items: OrderItem[],
   materials: Material[],
-  config: PricingConfig
+  config: PricingConfig,
+  segmentMultiplier: number = 2.0,
+  totalLaborHours: number = 0,
+  weekendSurcharge: boolean = false,
+  installationFee: number = 0
 ): QuoteResult {
   const materialMap = new Map(materials.map((m) => [m.id, m]));
+  const itemCount = items.length > 0 ? items.length : 1;
+  const laborHoursPerItem = totalLaborHours / itemCount;
 
   const calculatedItems = items.map((item) => {
-    // Edge case: materialId not found → use fallback material
     const material = materialMap.get(item.materialId) ?? UNKNOWN_MATERIAL;
-    return calculateItemPrice(item, material, config);
+    return calculateItemPrice(item, material, config, segmentMultiplier, laborHoursPerItem, weekendSurcharge);
   });
 
   const subtotal = safeNum(calculatedItems.reduce((sum, i) => sum + i.subtotal, 0));
   const despachoCost = safeNum(config.despachoCost);
-  const totalAmount = safeNum(subtotal + despachoCost);
+  const safeInstallFee = safeNum(installationFee);
+  const totalAmount = safeNum(subtotal + despachoCost + safeInstallFee);
 
-  return { calculatedItems, subtotal, despachoCost, totalAmount };
+  return { calculatedItems, subtotal, despachoCost, installationFee: safeInstallFee, totalAmount };
 }
 
 export function recalculateWithOverrides(
@@ -188,12 +204,13 @@ export function recalculateWithOverrides(
   });
 
   const subtotal = safeNum(calculatedItems.reduce((sum, i) => sum + i.subtotal, 0));
-  const totalAmount = safeNum(subtotal + quote.despachoCost);
+  const totalAmount = safeNum(subtotal + quote.despachoCost + quote.installationFee);
 
   return {
     calculatedItems,
     subtotal,
     despachoCost: quote.despachoCost,
+    installationFee: quote.installationFee,
     totalAmount,
   };
 }

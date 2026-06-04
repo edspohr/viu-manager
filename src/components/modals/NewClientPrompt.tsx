@@ -20,13 +20,31 @@ export function NewClientPrompt({
   const [mode, setMode] = useState<'choose' | 'create' | 'link'>('choose');
   const [name, setName] = useState(detectedName);
   const [type, setType] = useState<Customer['type']>('Esporádico');
+  const [segment, setSegment] = useState<Customer['segment']>('B');
+  const [clientCode, setClientCode] = useState('');
+  const [rut, setRut] = useState('');
+  const [projectManager, setProjectManager] = useState('');
   const [contact, setContact] = useState('');
   const [linkId, setLinkId] = useState('');
 
   const handleCreate = () => {
     if (!name.trim()) return;
-    onCreateNew({ name: name.trim(), type, contact, debt: 0 });
+    onCreateNew({
+      name: name.trim(),
+      type,
+      contact,
+      debt: 0,
+      rut,
+      projectManager,
+      address: '',
+      segment,
+      clientCode: clientCode.toUpperCase().slice(0, 3),
+      initialCorrelative: 1,
+      orderCount: 0,
+    });
   };
+
+  const canCreate = name.trim().length > 0 && clientCode.trim().length === 3;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/60 backdrop-blur-sm p-4">
@@ -88,7 +106,7 @@ export function NewClientPrompt({
           )}
 
           {mode === 'create' && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div>
                 <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Nombre</label>
                 <input
@@ -117,6 +135,62 @@ export function NewClientPrompt({
                   ))}
                 </div>
               </div>
+              {/* Segment A/B/C */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Segmento <span className="text-red-400">*</span></label>
+                <div className="flex gap-2">
+                  {(['A', 'B', 'C'] as const).map((seg) => (
+                    <button
+                      key={seg}
+                      onClick={() => setSegment(seg)}
+                      className={cn(
+                        'flex-1 py-2 rounded-xl text-sm font-bold border transition-all',
+                        segment === seg
+                          ? seg === 'A' ? 'bg-emerald-500 text-white border-emerald-500'
+                            : seg === 'B' ? 'bg-blue-500 text-white border-blue-500'
+                            : 'bg-amber-500 text-white border-amber-500'
+                          : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-400'
+                      )}
+                    >
+                      {seg}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Client code */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">
+                  Código cliente (3 letras) <span className="text-red-400">*</span>
+                </label>
+                <input
+                  value={clientCode}
+                  onChange={(e) => setClientCode(e.target.value.toUpperCase().slice(0, 3))}
+                  placeholder="SBX"
+                  maxLength={3}
+                  className="w-full px-3 py-2.5 border border-zinc-200 rounded-xl text-sm font-mono tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-colors uppercase"
+                />
+                <p className="text-[11px] text-zinc-400 mt-1">Se usará en el número de cotización (ej: SBX001)</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">RUT</label>
+                  <input
+                    value={rut}
+                    onChange={(e) => setRut(e.target.value)}
+                    placeholder="12.345.678-9"
+                    className="w-full px-3 py-2 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-colors placeholder:text-zinc-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Encargado</label>
+                  <input
+                    value={projectManager}
+                    onChange={(e) => setProjectManager(e.target.value)}
+                    placeholder="Nombre"
+                    className="w-full px-3 py-2 border border-zinc-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-colors placeholder:text-zinc-300"
+                  />
+                </div>
+              </div>
               <div>
                 <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Contacto (opcional)</label>
                 <input
@@ -132,7 +206,7 @@ export function NewClientPrompt({
                 </button>
                 <button
                   onClick={handleCreate}
-                  disabled={!name.trim()}
+                  disabled={!canCreate}
                   className="flex-1 py-2.5 bg-zinc-900 text-white rounded-xl text-sm font-medium hover:opacity-90 disabled:opacity-40 transition-all"
                 >
                   Crear cliente
