@@ -53,7 +53,7 @@ async function callGemini(
 ): Promise<GeminiExtractionResult> {
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     generationConfig: { maxOutputTokens: 8192 } as Record<string, unknown>,
   });
 

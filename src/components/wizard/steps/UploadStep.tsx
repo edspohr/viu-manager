@@ -120,7 +120,7 @@ export function UploadStep({ state, update, onAnalyze, analyzing }: UploadStepPr
         {analyzing ? (
           <>
             <Loader2 size={15} className="animate-spin" strokeWidth={2.5} />
-            Gemini 2.0 analizando...
+            Gemini 2.5 analizando...
           </>
         ) : (
           <>
