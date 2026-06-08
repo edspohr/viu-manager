@@ -115,19 +115,30 @@ export function calculateItemPrice(
   let baseCost: number;
   let planchasUsed: number | undefined;
 
-  if (material.type === "Flexible") {
-    const areaM2 = (item.width * item.height) / 10000;
-    baseCost = safeNum(areaM2 * effectivePrice);
-    if (item.doubleSided) baseCost *= 2;
-  } else {
-    // Rigid: 120×240 safety perimeter workspace
+  // Determine effective unit mode. Older catalog rows may not have unitMode
+  // set; fall back to the original "Flexible → per_m2, Rígido → per_plancha".
+  const unitMode =
+    material.unitMode ??
+    (material.type === "Rígido" ? "per_plancha" : "per_m2");
+
+  if (unitMode === "per_plancha") {
+    // Rigid: workspace defined by sheetWidth/sheetHeight (cm), default 120×240.
     const sheetArea =
       (material.sheetWidth ?? 120) * (material.sheetHeight ?? 240);
     const pieceArea = item.width * item.height;
     planchasUsed = sheetArea > 0 ? safeNum(pieceArea / sheetArea) : 0;
     baseCost = safeNum(planchasUsed * effectivePrice);
-    if (item.doubleSided) baseCost *= 2;
+  } else {
+    // Flexible: derive CLP/m² then multiply by piece area in m².
+    const areaM2 = (item.width * item.height) / 10000;
+    let pricePerM2 = effectivePrice;
+    if (unitMode === "per_roll") {
+      const rollAreaM2 = (material.rollWidth ?? 0) * (material.rollLength ?? 0);
+      pricePerM2 = rollAreaM2 > 0 ? effectivePrice / rollAreaM2 : effectivePrice;
+    }
+    baseCost = safeNum(areaM2 * pricePerM2);
   }
+  if (item.doubleSided) baseCost *= 2;
 
   // Labor cost with optional weekend surcharge
   const laborRate = config.laborHourRate ?? 15000;

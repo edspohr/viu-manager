@@ -1,16 +1,43 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { Search, Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Search, Plus, Trash2, ChevronDown, ChevronRight, Upload } from 'lucide-react';
 import { useStore } from '../../../store/useStore';
 import { SectionHeader } from './CompanySection';
 import { cn } from '../../../lib/utils';
 import type { Customer } from '../../../data/mockData';
+import { parseCustomersXlsx, mergeCustomers } from '../../../lib/customerImport';
 
 export function CustomersSection() {
   const { customers, addCustomer, updateCustomer, deleteCustomer } = useStore();
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    try {
+      const rows = await parseCustomersXlsx(file);
+      if (rows.length === 0) {
+        toast.error('No se encontraron columnas "Cliente" y "RUT" en el archivo');
+        return;
+      }
+      const report = mergeCustomers(customers, rows, {
+        onAdd: addCustomer,
+        onUpdate: updateCustomer,
+      });
+      toast.success(
+        `Importación: ${report.added} agregados, ${report.updated} actualizados, ${report.skipped} sin cambios`,
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al leer el archivo');
+    }
+  };
 
   const filtered = useMemo(() => {
     if (!search.trim()) return customers;
@@ -55,12 +82,27 @@ export function CustomersSection() {
           title="Clientes"
           description={`${customers.length} en el catálogo`}
         />
-        <button
-          onClick={handleAdd}
-          className="flex items-center gap-1.5 px-3.5 py-2 bg-viu-500 hover:bg-viu-400 active:bg-viu-600 text-ink rounded-xl text-sm font-bold transition-all duration-150 shadow-viu-soft"
-        >
-          <Plus size={14} strokeWidth={2.3} /> Agregar
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          <button
+            onClick={handleImportClick}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 text-zinc-700 rounded-xl text-sm font-bold transition-all duration-150"
+          >
+            <Upload size={14} strokeWidth={2.3} /> Importar Excel
+          </button>
+          <button
+            onClick={handleAdd}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-viu-500 hover:bg-viu-400 active:bg-viu-600 text-ink rounded-xl text-sm font-bold transition-all duration-150 shadow-viu-soft"
+          >
+            <Plus size={14} strokeWidth={2.3} /> Agregar
+          </button>
+        </div>
       </div>
 
       {/* Search */}

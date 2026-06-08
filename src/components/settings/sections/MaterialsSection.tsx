@@ -20,7 +20,13 @@ export function MaterialsSection() {
     if (typeFilter !== 'all') result = result.filter((m) => m.type === typeFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
-      result = result.filter((m) => m.name.toLowerCase().includes(q));
+      result = result.filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) ||
+          (m.brand ?? '').toLowerCase().includes(q) ||
+          (m.supplierCode ?? '').toLowerCase().includes(q) ||
+          (m.category ?? '').toLowerCase().includes(q),
+      );
     }
     return result;
   }, [materials, search, typeFilter]);
@@ -147,8 +153,10 @@ function MaterialRow({ material, expanded, onToggle, onUpdate, onDelete }: Mater
         </span>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-zinc-900 truncate">{material.name}</p>
-          <p className="text-xs text-zinc-500">
-            {material.type} · {material.unit}
+          <p className="text-xs text-zinc-500 truncate">
+            {[material.brand, material.category, material.supplierCode, `${material.type} · ${material.unit}`]
+              .filter(Boolean)
+              .join(' · ')}
           </p>
         </div>
         <div className="text-right">
@@ -184,6 +192,29 @@ function MaterialRow({ material, expanded, onToggle, onUpdate, onDelete }: Mater
                   </select>
                 </SmallField>
               </div>
+
+              {(material.supplierCode || material.brand || material.category) && (
+                <div className="rounded-xl bg-zinc-50 border border-zinc-200 px-3 py-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  {material.brand && (
+                    <div><span className="text-zinc-400">Marca</span><br /><span className="font-semibold text-zinc-700">{material.brand}</span></div>
+                  )}
+                  {material.category && (
+                    <div><span className="text-zinc-400">Categoría</span><br /><span className="font-semibold text-zinc-700">{material.category}</span></div>
+                  )}
+                  {material.supplierCode && (
+                    <div className="col-span-2 sm:col-span-1"><span className="text-zinc-400">Código</span><br /><span className="font-mono text-zinc-700 break-all">{material.supplierCode}</span></div>
+                  )}
+                  {material.unitMode && (
+                    <div><span className="text-zinc-400">Unidad</span><br /><span className="font-semibold text-zinc-700">{material.unitMode === 'per_plancha' ? 'CLP/plancha' : material.unitMode === 'per_m2' ? 'CLP/m²' : 'CLP/rollo'}</span></div>
+                  )}
+                  {material.unitMode === 'per_roll' && material.rollWidth && material.rollLength && (
+                    <div className="col-span-2 sm:col-span-2"><span className="text-zinc-400">Rollo</span><br /><span className="font-mono text-zinc-700">{material.rollWidth}m × {material.rollLength}m</span></div>
+                  )}
+                  {material.unitMode === 'per_m2' && material.rollWidth && material.rollLength && (
+                    <div className="col-span-2 sm:col-span-2"><span className="text-zinc-400">Rollo ref.</span><br /><span className="font-mono text-zinc-700">{material.rollWidth}m × {material.rollLength}m</span></div>
+                  )}
+                </div>
+              )}
 
               {/* Supplier prices */}
               <div>

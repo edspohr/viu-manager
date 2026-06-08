@@ -366,9 +366,9 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'viu-manager-storage',
-      version: 9,
+      version: 10,
       migrate: (_persistedState: unknown, _version: number) => {
-        // v9: quotation-centric refactor — clean reset
+        // v10: seed DIPISA materials + 12 default clients — clean reset
         return defaultState;
       },
     }

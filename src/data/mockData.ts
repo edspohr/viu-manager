@@ -14,19 +14,32 @@ export interface Customer {
   orderCount: number; // incremented on each new order, default 0
 }
 
+export type MaterialUnitMode = "per_plancha" | "per_m2" | "per_roll";
+
 export interface Material {
   id: string;
   name: string;
   type: "Rígido" | "Flexible";
   stock: number;
-  unit: string; // "planchas" for rigid, "m" for flexible
-  supplier1Price: number; // CLP per plancha (rigid) or CLP per m² (flexible)
+  unit: string; // "planchas" for rigid, "m" for flexible, "resma" for digital paper
+  // supplier1Price meaning depends on unitMode:
+  //   per_plancha → CLP per plancha
+  //   per_m2      → CLP per m²
+  //   per_roll    → CLP per whole roll (derive $/m² from rollWidth × rollLength at quote time)
+  supplier1Price: number;
   supplier2Price: number;
   supplier3Price: number;
   activeSupplier: 1 | 2 | 3 | "average";
-  sheetWidth?: number; // cm — only for rigid, safety perimeter: 120×240
-  sheetHeight?: number; // cm — only for rigid, safety perimeter: 120×240
+  sheetWidth?: number; // cm — only for per_plancha
+  sheetHeight?: number; // cm — only for per_plancha
   minPrice?: number; // minimum CLP per piece (floor price)
+  // Extended (DIPISA April 2025 catalog)
+  unitMode?: MaterialUnitMode; // optional for backwards compat; defaults inferred from type
+  rollWidth?: number; // m — for per_m2 / per_roll items
+  rollLength?: number; // m — for per_m2 / per_roll items
+  brand?: string; // e.g. ADTACK, 3M, AVERY, FEDRIGONI
+  supplierCode?: string; // DIPISA SKU
+  category?: string; // source sheet, e.g. "TELAS PVC"
 }
 
 export interface OrderItem {
@@ -157,122 +170,26 @@ export const initialPricingConfig: PricingConfig = {
   bankDetails: '',
 };
 
-// §4.3 — No test orders or test customers. Materials are production defaults.
-export const customers: Customer[] = [];
+// Seed clients from docs/CLIENTES VIU-2.xlsx (12 known VIU customers).
+// Codes auto-derived from name; user can refine in Settings → Clientes.
+export const customers: Customer[] = [
+  { id: "c-laguinda",    name: "LA GUINDA",                type: "Recurrente", contact: "", debt: 0, rut: "76.029.357-1", projectManager: "", address: "", segment: "B", clientCode: "LAG", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-levislaguinda", name: "LEVIS LA GUINDA",        type: "Recurrente", contact: "", debt: 0, rut: "76.029.357-1", projectManager: "", address: "", segment: "B", clientCode: "LLG", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-hollyconcept", name: "HOLLY CONCEPT",           type: "Recurrente", contact: "", debt: 0, rut: "77.790.766-2", projectManager: "", address: "", segment: "B", clientCode: "HOC", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-dutties",     name: "DUTTIES",                  type: "Recurrente", contact: "", debt: 0, rut: "78.066.387-1", projectManager: "", address: "", segment: "B", clientCode: "DUT", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-fashionpark", name: "FASHION PARK",             type: "Recurrente", contact: "", debt: 0, rut: "78.553.100-1", projectManager: "", address: "", segment: "B", clientCode: "FAP", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-pepper",      name: "PEPPER",                   type: "Recurrente", contact: "", debt: 0, rut: "76.755.090-1", projectManager: "", address: "", segment: "B", clientCode: "PEP", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-mcinfinit",   name: "MC INFINIT",               type: "Recurrente", contact: "", debt: 0, rut: "78.138.675-8", projectManager: "", address: "", segment: "B", clientCode: "MCI", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-pdvpublicidad", name: "PDV PUBLICIDAD (HERNAN)", type: "Recurrente", contact: "", debt: 0, rut: "78.054.744-8", projectManager: "Hernán", address: "", segment: "B", clientCode: "PDV", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-sokobox",     name: "SOKOBOX",                  type: "Recurrente", contact: "", debt: 0, rut: "76.468.448-6", projectManager: "", address: "", segment: "B", clientCode: "SBX", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-walzdisenos", name: "WALZ DISEÑOS",             type: "Recurrente", contact: "", debt: 0, rut: "76.943.478-K", projectManager: "", address: "", segment: "B", clientCode: "WAL", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-malex",       name: "MALEX",                    type: "Recurrente", contact: "", debt: 0, rut: "77.245.748-0", projectManager: "", address: "", segment: "B", clientCode: "MAL", initialCorrelative: 1, orderCount: 0 },
+  { id: "c-paularestrepo", name: "PAULA RESTREPO",         type: "Recurrente", contact: "", debt: 0, rut: "76.488.031-5", projectManager: "", address: "", segment: "B", clientCode: "PAR", initialCorrelative: 1, orderCount: 0 },
+];
 
 export const initialOrders: Order[] = [];
 
-// Default material catalog — prices editable by admin/superadmin in PricingConfigModal
-export const materials: Material[] = [
-  {
-    id: "m1",
-    name: "Foam 5MM (Fomex)",
-    type: "Rígido",
-    stock: 0,
-    unit: "planchas",
-    supplier1Price: 15000,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-    sheetWidth: 120,
-    sheetHeight: 240,
-    minPrice: 1500,
-  },
-  {
-    id: "m2",
-    name: "Sintra 3MM (Trovicel)",
-    type: "Rígido",
-    stock: 0,
-    unit: "planchas",
-    supplier1Price: 12000,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-    sheetWidth: 120,
-    sheetHeight: 240,
-    minPrice: 1500,
-  },
-  {
-    id: "m3",
-    name: "Sintra 5MM (PVC)",
-    type: "Rígido",
-    stock: 0,
-    unit: "planchas",
-    supplier1Price: 18000,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-    sheetWidth: 120,
-    sheetHeight: 240,
-    minPrice: 2000,
-  },
-  {
-    id: "m4",
-    name: "PP Alveolar 6MM",
-    type: "Rígido",
-    stock: 0,
-    unit: "planchas",
-    supplier1Price: 8000,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-    sheetWidth: 120,
-    sheetHeight: 240,
-    minPrice: 1200,
-  },
-  {
-    id: "m5",
-    name: "Adhesivo Laminado Matte",
-    type: "Flexible",
-    stock: 0,
-    unit: "m",
-    supplier1Price: 9000,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-  },
-  {
-    id: "m6",
-    name: "Adhesivo Black Out Matte",
-    type: "Flexible",
-    stock: 0,
-    unit: "m",
-    supplier1Price: 7770,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-  },
-  {
-    id: "m7",
-    name: "Vinilo Blanco Plotter",
-    type: "Flexible",
-    stock: 0,
-    unit: "m",
-    supplier1Price: 10500,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-  },
-  {
-    id: "m8",
-    name: "Tela PVC",
-    type: "Flexible",
-    stock: 0,
-    unit: "m",
-    supplier1Price: 6800,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-  },
-  {
-    id: "m9",
-    name: "Floorgraphic Laminado Piso",
-    type: "Flexible",
-    stock: 0,
-    unit: "m",
-    supplier1Price: 11500,
-    supplier2Price: 0,
-    supplier3Price: 0,
-    activeSupplier: 1,
-  },
-];
+// Default material catalog imported from DIPISA April 2025 price list.
+// Source file: docs/DIPISA - Lista de Precios ABRIL 2025 ... .xls
+// Regenerate via:  node scripts/parseDipisa.mjs > src/data/dipisaMaterials.ts
+export { dipisaMaterials as materials } from "./dipisaMaterials";
