@@ -52,7 +52,7 @@ export function UploadStep({ state, update, onAnalyze, analyzing }: UploadStepPr
           ref={inputRef}
           type="file"
           multiple
-          accept="application/pdf,image/png,image/jpeg,image/jpg,.xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+          accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
           onChange={(e) => addFiles(e.target.files)}
           className="hidden"
         />
