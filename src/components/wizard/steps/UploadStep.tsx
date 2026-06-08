@@ -1,7 +1,11 @@
 import { useRef } from 'react';
 import { Sparkles, Upload, FileText, X, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '../../../lib/utils';
 import type { WizardState } from '../AIQuoteWizard';
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
+const MAX_FILE_COUNT = 5;                // total files in the wizard
 
 interface UploadStepProps {
   state: WizardState;
@@ -15,7 +19,28 @@ export function UploadStep({ state, update, onAnalyze, analyzing }: UploadStepPr
 
   const addFiles = (newFiles: FileList | null) => {
     if (!newFiles || newFiles.length === 0) return;
-    update({ files: [...state.files, ...Array.from(newFiles)] });
+    const incoming = Array.from(newFiles);
+
+    // Reject oversized files
+    const oversized = incoming.filter((f) => f.size > MAX_FILE_BYTES);
+    if (oversized.length > 0) {
+      toast.error(`Archivo demasiado grande (máx 10 MB): ${oversized.map((f) => f.name).join(', ')}`);
+    }
+    const accepted = incoming.filter((f) => f.size <= MAX_FILE_BYTES);
+
+    // Enforce total count
+    const room = MAX_FILE_COUNT - state.files.length;
+    if (room <= 0) {
+      toast.error(`Máximo ${MAX_FILE_COUNT} archivos por cotización`);
+    } else {
+      if (accepted.length > room) {
+        toast.error(`Solo se agregaron ${room} archivos (límite ${MAX_FILE_COUNT})`);
+      }
+      const toAdd = accepted.slice(0, room);
+      if (toAdd.length > 0) {
+        update({ files: [...state.files, ...toAdd] });
+      }
+    }
     // Reset the input so re-selecting the same file (after removal) fires onChange again.
     if (inputRef.current) inputRef.current.value = '';
   };
@@ -69,7 +94,7 @@ export function UploadStep({ state, update, onAnalyze, analyzing }: UploadStepPr
               </div>
             </div>
             <p className="text-sm font-semibold text-ink">Arrastra archivos aquí o haz clic para elegirlos</p>
-            <p className="text-xs text-zinc-500 mt-1">PDF, JPG, PNG, Excel (.xlsx/.xls), CSV · Solicitudes, briefs, planillas</p>
+            <p className="text-xs text-zinc-500 mt-1">PDF, JPG, PNG, Excel (.xlsx/.xls), CSV · Máx 10 MB · Hasta 5 archivos</p>
           </div>
         ) : (
           <div className="space-y-2">
