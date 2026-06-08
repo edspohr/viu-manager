@@ -186,6 +186,11 @@ Schema: { "campaignName": string, "clientName": string, "items": ExtractedItem[]
     if (err instanceof ParseError) {
       throw err;
     }
+    console.error('Gemini call failed (1st attempt):', err);
+
+    // Classify the error so we can show something more useful than "network error".
+    const classified = classifyGeminiError(err);
+    if (classified) throw classified;
 
     // Network / transient error → one automatic retry
     try {
@@ -194,9 +199,47 @@ Schema: { "campaignName": string, "clientName": string, "items": ExtractedItem[]
       if (retryErr instanceof ParseError) {
         throw retryErr;
       }
+      console.error('Gemini call failed (retry):', retryErr);
+      const classifiedRetry = classifyGeminiError(retryErr);
+      if (classifiedRetry) throw classifiedRetry;
       throw new Error(
         'Error de red al contactar la IA. Intenta nuevamente en unos segundos.'
       );
     }
   }
+}
+
+/**
+ * Maps SDK / fetch errors to user-friendly Spanish messages. Returns null if
+ * the error looks transient (worth a retry) rather than something the user
+ * should be told about immediately.
+ */
+function classifyGeminiError(err: unknown): Error | null {
+  const message = err instanceof Error ? err.message : String(err);
+  const lower = message.toLowerCase();
+
+  // Timeout from our own withTimeout — surface directly, no retry.
+  if (lower.includes('no respondió a tiempo')) {
+    return new Error(message);
+  }
+
+  // 4xx — typically permanent for this request, retrying won't help.
+  if (lower.includes('api key not valid') || lower.includes('api_key_invalid')) {
+    return new Error('API key inválida. Verifica VITE_GEMINI_API_KEY.');
+  }
+  if (lower.includes('permission_denied') || lower.includes('forbidden') || lower.includes('403')) {
+    return new Error('La API key no tiene permisos. Revisa restricciones de referrer en Google Cloud Console.');
+  }
+  if (lower.includes('quota') || lower.includes('rate') || lower.includes('429')) {
+    return new Error('Cuota de IA agotada o demasiadas solicitudes. Espera un minuto e intenta de nuevo.');
+  }
+  if (lower.includes('safety') || lower.includes('blocked')) {
+    return new Error('La IA bloqueó la respuesta por política de seguridad. Revisa el contenido del archivo.');
+  }
+  if (lower.includes('400') || lower.includes('invalid')) {
+    return new Error('La IA rechazó la solicitud (formato inválido). Revisa el archivo.');
+  }
+
+  // Anything else: treat as transient, allow retry.
+  return null;
 }
