@@ -52,7 +52,7 @@ export function UploadStep({ state, update, onAnalyze, analyzing }: UploadStepPr
           ref={inputRef}
           type="file"
           multiple
-          accept="application/pdf,image/png,image/jpeg,image/jpg"
+          accept="application/pdf,image/png,image/jpeg,image/jpg,.xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
           onChange={(e) => addFiles(e.target.files)}
           className="hidden"
         />
@@ -66,7 +66,7 @@ export function UploadStep({ state, update, onAnalyze, analyzing }: UploadStepPr
               </div>
             </div>
             <p className="text-sm font-semibold text-ink">Arrastra archivos aquí o haz clic para elegirlos</p>
-            <p className="text-xs text-zinc-500 mt-1">PDF, JPG, PNG · Solicitudes, briefs, planillas</p>
+            <p className="text-xs text-zinc-500 mt-1">PDF, JPG, PNG, Excel (.xlsx/.xls), CSV · Solicitudes, briefs, planillas</p>
           </div>
         ) : (
           <div className="space-y-2">

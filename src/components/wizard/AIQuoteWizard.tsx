@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { X, ChevronLeft, ChevronRight, Sparkles, FileText, User, Package, ClipboardList, Settings2, CheckCircle2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { extractOrderItems, findMatchingCustomer, type GeminiExtractionResult, type ExtractedItem } from '../../lib/geminiService';
+import { excelToText, isSpreadsheetFile } from '../../lib/excelParser';
 import { calculateOrderQuote } from '../../lib/quoteEngine';
 import { generateQuotationCode } from '../../lib/orderUtils';
 import type { Customer, Material, OrderItem, Order } from '../../data/mockData';
@@ -111,7 +112,14 @@ export function AIQuoteWizard({ isOpen, onClose }: AIQuoteWizardProps) {
     }
     setAnalyzing(true);
     try {
-      const result = await extractOrderItems(state.emailText, state.files, materials);
+      // Split spreadsheets (Excel/CSV) from image/PDF — Gemini only accepts
+      // inline image data for the latter, so spreadsheets are pre-converted to text.
+      const spreadsheetFiles = state.files.filter(isSpreadsheetFile);
+      const otherFiles = state.files.filter((f) => !isSpreadsheetFile(f));
+      const spreadsheetText = spreadsheetFiles.length > 0
+        ? (await Promise.all(spreadsheetFiles.map(excelToText))).join('\n\n')
+        : undefined;
+      const result = await extractOrderItems(state.emailText, otherFiles, materials, spreadsheetText);
       // Try to match customer
       const matched = findMatchingCustomer(result.clientName, customers);
       // Map extracted items → OrderItem skeletons
