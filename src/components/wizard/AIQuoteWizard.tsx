@@ -116,9 +116,17 @@ export function AIQuoteWizard({ isOpen, onClose }: AIQuoteWizardProps) {
       // inline image data for the latter, so spreadsheets are pre-converted to text.
       const spreadsheetFiles = state.files.filter(isSpreadsheetFile);
       const otherFiles = state.files.filter((f) => !isSpreadsheetFile(f));
-      const spreadsheetText = spreadsheetFiles.length > 0
-        ? (await Promise.all(spreadsheetFiles.map(excelToText))).join('\n\n')
-        : undefined;
+      let spreadsheetText: string | undefined;
+      if (spreadsheetFiles.length > 0) {
+        try {
+          const texts = await Promise.all(spreadsheetFiles.map(excelToText));
+          spreadsheetText = texts.join('\n\n');
+        } catch (parseErr) {
+          console.error('Excel parse failed', parseErr);
+          toast.error('No se pudo leer el Excel. Revisa que no esté corrupto.');
+          return;
+        }
+      }
       const result = await extractOrderItems(state.emailText, otherFiles, materials, spreadsheetText);
       // Try to match customer
       const matched = findMatchingCustomer(result.clientName, customers);

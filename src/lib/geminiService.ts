@@ -42,6 +42,23 @@ async function fileToGenerativePart(file: File) {
   return { inlineData: { data: base64, mimeType: file.type } };
 }
 
+/** Hard ceiling for a single Gemini call — beyond this, treat as a network hang. */
+const GEMINI_TIMEOUT_MS = 90_000;
+
+/** Race a promise against a timeout, rejecting if the deadline hits first. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} (>${Math.round(ms / 1000)}s)`)),
+      ms,
+    );
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 /**
  * Calls Gemini once. Returns the parsed extraction result.
  * Throws typed errors for parse failures, empty results, etc.
@@ -57,7 +74,11 @@ async function callGemini(
     generationConfig: { maxOutputTokens: 8192 } as Record<string, unknown>,
   });
 
-  const result = await model.generateContent([prompt, ...imageParts]);
+  const result = await withTimeout(
+    model.generateContent([prompt, ...imageParts]),
+    GEMINI_TIMEOUT_MS,
+    'La IA no respondió a tiempo',
+  );
   const text = result.response.text();
   const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
 
@@ -98,12 +119,26 @@ export async function extractOrderItems(
     throw new Error('API key no configurada. Revisa el archivo .env');
   }
 
+  // The catalog can be very large (200+ SKUs from DIPISA). Keep the prompt under
+  // ~50KB by trimming long names — Gemini still matches well on shortened names.
   const materialList = availableMaterials
-    .map((m) => `  - id: "${m.id}", name: "${m.name}", type: ${m.type}`)
+    .map((m) => {
+      const shortName = m.name.length > 80 ? m.name.slice(0, 80) + '…' : m.name;
+      return `  - id: "${m.id}", name: "${shortName}", type: ${m.type}`;
+    })
     .join('\n');
 
-  const spreadsheetSection = spreadsheetText
-    ? `\n\nSpreadsheet/CSV data extracted from uploaded file:\n${spreadsheetText}`
+  // Truncate spreadsheet text so a huge xlsx (e.g. supplier price list) doesn't
+  // blow up the prompt or trigger model timeouts. 60KB ≈ ~15K tokens.
+  const SPREADSHEET_LIMIT = 60_000;
+  let trimmedSpreadsheet = spreadsheetText ?? '';
+  if (trimmedSpreadsheet.length > SPREADSHEET_LIMIT) {
+    trimmedSpreadsheet =
+      trimmedSpreadsheet.slice(0, SPREADSHEET_LIMIT) +
+      `\n\n[... truncado: archivo demasiado grande, mostrados ${SPREADSHEET_LIMIT} caracteres de ${spreadsheetText!.length} ...]`;
+  }
+  const spreadsheetSection = trimmedSpreadsheet
+    ? `\n\nSpreadsheet/CSV data extracted from uploaded file:\n${trimmedSpreadsheet}`
     : '';
 
   const prompt = `You are an expert estimator for VIU Print, a large-format printing company in Chile.

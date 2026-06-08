@@ -14,12 +14,15 @@ export function UploadStep({ state, update, onAnalyze, analyzing }: UploadStepPr
   const inputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = (newFiles: FileList | null) => {
-    if (!newFiles) return;
+    if (!newFiles || newFiles.length === 0) return;
     update({ files: [...state.files, ...Array.from(newFiles)] });
+    // Reset the input so re-selecting the same file (after removal) fires onChange again.
+    if (inputRef.current) inputRef.current.value = '';
   };
 
   const removeFile = (idx: number) => {
     update({ files: state.files.filter((_, i) => i !== idx) });
+    if (inputRef.current) inputRef.current.value = '';
   };
 
   const handleDrop = (e: React.DragEvent) => {
