@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Material, Customer } from '../data/mockData';
+import { selectRelevantMaterials } from './materialSearch';
 
 export interface ExtractedItem {
   description: string;
@@ -119,15 +120,6 @@ export async function extractOrderItems(
     throw new Error('API key no configurada. Revisa el archivo .env');
   }
 
-  // The catalog can be very large (200+ SKUs from DIPISA). Keep the prompt under
-  // ~50KB by trimming long names — Gemini still matches well on shortened names.
-  const materialList = availableMaterials
-    .map((m) => {
-      const shortName = m.name.length > 80 ? m.name.slice(0, 80) + '…' : m.name;
-      return `  - id: "${m.id}", name: "${shortName}", type: ${m.type}`;
-    })
-    .join('\n');
-
   // Truncate spreadsheet text so a huge xlsx (e.g. supplier price list) doesn't
   // blow up the prompt or trigger model timeouts. 60KB ≈ ~15K tokens.
   const SPREADSHEET_LIMIT = 60_000;
@@ -140,6 +132,22 @@ export async function extractOrderItems(
   const spreadsheetSection = trimmedSpreadsheet
     ? `\n\nSpreadsheet/CSV data extracted from uploaded file:\n${trimmedSpreadsheet}`
     : '';
+
+  // Pre-filter the catalog by relevance: pick only the SKUs that match the
+  // request keywords (plus a small diverse coverage pool as fallback). This
+  // keeps the prompt small even with a 200+ SKU catalog. Materials the model
+  // can't match will come back via `unknownMaterials` and the wizard's
+  // MaterialsStep lets the user pick the right one manually.
+  const relevant = selectRelevantMaterials(
+    availableMaterials,
+    `${emailText}\n${trimmedSpreadsheet}`,
+  );
+  const materialList = relevant
+    .map((m) => {
+      const shortName = m.name.length > 80 ? m.name.slice(0, 80) + '…' : m.name;
+      return `  - id: "${m.id}", name: "${shortName}", type: ${m.type}`;
+    })
+    .join('\n');
 
   const prompt = `You are an expert estimator for VIU Print, a large-format printing company in Chile.
 IMPORTANT: You MUST extract ALL items listed in the document without any limit. Do NOT truncate or skip any items. If there are 20 items, return all 20. Never stop early.
