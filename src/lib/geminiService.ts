@@ -295,3 +295,83 @@ function classifyGeminiError(err: unknown): Error | null {
   // Anything else: treat as transient, allow retry.
   return null;
 }
+
+/**
+ * Lightweight Gemini call to fill missing metadata fields (clientName,
+ * campaignName, eventName, deliveryDate, requiresInstallation) when the
+ * deterministic structured extractor parsed the items but couldn't find
+ * everything in the header. Uses the same retry/fallback chain.
+ *
+ * Returns a partial metadata object; never throws — callers should treat a
+ * failure as "no extra metadata, continue without it".
+ */
+export interface MetadataCompletion {
+  clientName?: string;
+  campaignName?: string;
+  eventName?: string;
+  deliveryDate?: string;
+  requiresInstallation?: boolean;
+  notes?: string;
+}
+
+export async function completeMetadata(
+  snippet: string,
+  missing: string[],
+): Promise<MetadataCompletion> {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+  if (!apiKey || missing.length === 0 || !snippet.trim()) return {};
+
+  // Cap the snippet at 2 KB — header info is always at the top of the doc.
+  const text = snippet.length > 2000 ? snippet.slice(0, 2000) : snippet;
+
+  const prompt = `Extract these missing fields from the text below. Return ONLY valid JSON with the requested keys (and nothing else). Empty string when not found. For dates use ISO yyyy-mm-dd.
+Missing fields: ${missing.join(', ')}
+Text:
+${text}
+JSON:`;
+
+  try {
+    const result = await callGeminiRaw(prompt, [], apiKey);
+    return result;
+  } catch (err) {
+    console.warn('completeMetadata failed, continuing without it:', err);
+    return {};
+  }
+}
+
+/**
+ * Generic Gemini call that returns parsed JSON (no schema validation).
+ * Used by completeMetadata; doesn't throw ParseError because metadata is
+ * non-essential — caller decides what to do with a {} response.
+ */
+async function callGeminiRaw(
+  prompt: string,
+  imageParts: { inlineData: { data: string; mimeType: string } }[],
+  apiKey: string,
+): Promise<MetadataCompletion> {
+  let lastErr: unknown = null;
+  for (let modelIdx = 0; modelIdx < MODEL_CHAIN.length; modelIdx++) {
+    const modelName = MODEL_CHAIN[modelIdx];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: { maxOutputTokens: 512 } as Record<string, unknown>,
+        });
+        const result = await withTimeout(
+          model.generateContent([prompt, ...imageParts]),
+          30_000,
+          'La IA no respondió a tiempo',
+        );
+        const text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(text) as MetadataCompletion;
+      } catch (err) {
+        lastErr = err;
+        if (!isTransientGeminiError(err)) throw err;
+        if (attempt === 0) await sleep(500 * (modelIdx + 1));
+      }
+    }
+  }
+  throw lastErr ?? new Error('metadata completion failed');
+}

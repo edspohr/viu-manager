@@ -3,8 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { X, ChevronLeft, ChevronRight, Sparkles, FileText, User, Package, ClipboardList, Settings2, CheckCircle2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
-import { extractOrderItems, findMatchingCustomer, type GeminiExtractionResult, type ExtractedItem } from '../../lib/geminiService';
+import { extractOrderItems, findMatchingCustomer, completeMetadata, type GeminiExtractionResult, type ExtractedItem } from '../../lib/geminiService';
 import { excelToText, isSpreadsheetFile } from '../../lib/excelParser';
+import { pdfToText, isPdfFile } from '../../lib/pdfParser';
+import { extractStructured } from '../../lib/structuredExtractor';
 import { calculateOrderQuote } from '../../lib/quoteEngine';
 import { generateQuotationCode } from '../../lib/orderUtils';
 import type { Customer, Material, OrderItem, Order } from '../../data/mockData';
@@ -112,22 +114,94 @@ export function AIQuoteWizard({ isOpen, onClose }: AIQuoteWizardProps) {
     }
     setAnalyzing(true);
     try {
-      // Split spreadsheets (Excel/CSV) from image/PDF — Gemini only accepts
-      // inline image data for the latter, so spreadsheets are pre-converted to text.
-      const spreadsheetFiles = state.files.filter(isSpreadsheetFile);
-      const otherFiles = state.files.filter((f) => !isSpreadsheetFile(f));
-      let spreadsheetText: string | undefined;
-      if (spreadsheetFiles.length > 0) {
-        try {
-          const texts = await Promise.all(spreadsheetFiles.map(excelToText));
-          spreadsheetText = texts.join('\n\n');
-        } catch (parseErr) {
-          console.error('Excel parse failed', parseErr);
-          toast.error('No se pudo leer el Excel. Revisa que no esté corrupto.');
-          return;
+      // 1. Convert every spreadsheet/CSV + every PDF-with-text to plain text
+      //    locally. Anything that stays "binary" (images, scanned PDFs) goes
+      //    to Gemini as inlineData like before.
+      const binaryFiles: File[] = [];
+      const localTexts: string[] = [];
+      let primaryFileName = '';
+      for (const f of state.files) {
+        if (isSpreadsheetFile(f)) {
+          try {
+            const t = await excelToText(f);
+            localTexts.push(t);
+            if (!primaryFileName) primaryFileName = f.name;
+          } catch (e) {
+            console.error('Excel parse failed', e);
+            toast.error(`No se pudo leer ${f.name}. Verifica que no esté corrupto.`);
+            return;
+          }
+        } else if (isPdfFile(f)) {
+          try {
+            const t = await pdfToText(f);
+            if (t) {
+              localTexts.push(t);
+              if (!primaryFileName) primaryFileName = f.name;
+            } else {
+              // Scanned PDF → fall back to inlineData so Gemini can OCR it.
+              binaryFiles.push(f);
+            }
+          } catch (e) {
+            console.warn('PDF text extraction failed, sending as image instead', e);
+            binaryFiles.push(f);
+          }
+        } else {
+          binaryFiles.push(f);
         }
       }
-      const result = await extractOrderItems(state.emailText, otherFiles, materials, spreadsheetText);
+
+      const combinedLocalText = localTexts.join('\n\n');
+      if (!primaryFileName && state.files[0]) primaryFileName = state.files[0].name;
+
+      // 2. Capa A: try the deterministic extractor first. Only consider it
+      //    if we actually have local text (spreadsheets/PDFs); otherwise skip.
+      let result: GeminiExtractionResult | null = null;
+      let usedLocalExtractor = false;
+
+      if (combinedLocalText.length > 0) {
+        const structured = extractStructured(
+          `${state.emailText}\n${combinedLocalText}`,
+          primaryFileName || 'documento',
+          materials,
+        );
+        if (structured.confidence === 'high') {
+          usedLocalExtractor = true;
+          // Capa B: if metadata is incomplete, ask Gemini for just the missing
+          // pieces with a tiny prompt. Best-effort; failures don't abort.
+          let meta = structured.metadata;
+          if (structured.missingFields.length > 0) {
+            try {
+              const completion = await completeMetadata(
+                `${state.emailText}\n${combinedLocalText.slice(0, 1500)}`,
+                structured.missingFields,
+              );
+              meta = { ...meta, ...completion };
+            } catch (e) {
+              console.warn('completeMetadata best-effort failed', e);
+            }
+          }
+          result = {
+            campaignName: meta.campaignName ?? '',
+            clientName: meta.clientName ?? '',
+            items: structured.items,
+            unknownMaterials: structured.unknownMaterials,
+            requiresInstallation: meta.requiresInstallation ?? false,
+            notes: meta.notes ?? '',
+          };
+        }
+      }
+
+      // 3. Capa C: full AI flow as a fallback. Image/scanned-PDF files still
+      //    go as inlineData; everything else flows as text in spreadsheetText.
+      if (!result) {
+        result = await extractOrderItems(
+          state.emailText,
+          binaryFiles,
+          materials,
+          combinedLocalText || undefined,
+        );
+      }
+
       // Try to match customer
       const matched = findMatchingCustomer(result.clientName, customers);
       // Map extracted items → OrderItem skeletons
@@ -158,7 +232,11 @@ export function AIQuoteWizard({ isOpen, onClose }: AIQuoteWizardProps) {
         installationFee: result.requiresInstallation ? pricingConfig.instalacionDefault : 0,
         deliveryDate: new Date(Date.now() + pricingConfig.deliveryLeadDays * 86400000).toISOString().slice(0, 10),
       });
-      toast.success(`${result.items.length} ítems detectados`);
+      toast.success(
+        usedLocalExtractor
+          ? `${result.items.length} ítems detectados (sin IA)`
+          : `${result.items.length} ítems detectados`,
+      );
       goTo(2);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al analizar');
