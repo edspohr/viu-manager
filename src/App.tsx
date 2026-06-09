@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Toaster } from 'sonner';
 import { useAuth } from './lib/useAuth';
 import { useStore } from './store/useStore';
@@ -17,7 +17,11 @@ function App() {
   const auth = useAuth();
   const { switchUser } = useStore();
 
-  const [approvalOrderId, setApprovalOrderId] = useState<string | null>(null);
+  // Read the order id from the URL once — pure derivation, no effect needed.
+  const approvalOrderId = useMemo<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('order');
+  }, []);
   const [view, setView] = useState<AppView>('quotations');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -25,9 +29,6 @@ function App() {
 
   useEffect(() => {
     document.documentElement.classList.remove('dark');
-    const params = new URLSearchParams(window.location.search);
-    const orderId = params.get('order');
-    if (orderId) setApprovalOrderId(orderId);
   }, []);
 
   // Sync Firebase auth role into Zustand store

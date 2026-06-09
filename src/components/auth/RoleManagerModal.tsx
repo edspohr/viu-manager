@@ -31,11 +31,17 @@ export function RoleManagerModal({ isOpen, onClose }: RoleManagerModalProps) {
 
   useEffect(() => {
     if (!isOpen) return;
-    setLoading(true);
+    let cancelled = false;
+    // Note: don't call setLoading(true) synchronously here — it triggers a
+    // cascading render. The initial useState already starts as `true`, and
+    // re-opens of the modal stay in the previous loaded state until the new
+    // fetch settles, which is the desired UX.
     getDocs(collection(db, 'users')).then((snap) => {
+      if (cancelled) return;
       setUsers(snap.docs.map((d) => d.data() as AppUser));
       setLoading(false);
     });
+    return () => { cancelled = true; };
   }, [isOpen]);
 
   const handleRoleChange = async (uid: string, newRole: UserRole | 'pending') => {

@@ -367,8 +367,10 @@ export const useStore = create<AppState>()(
     {
       name: 'viu-manager-storage',
       version: 10,
-      migrate: (_persistedState: unknown, _version: number) => {
-        // v10: seed DIPISA materials + 12 default clients — clean reset
+      migrate: (persistedState, fromVersion) => {
+        // v10: seed DIPISA materials + 12 default clients — clean reset.
+        // Logged so we can see in DevTools when a migration actually fires.
+        console.info('viu-manager store: migrating from v' + fromVersion, persistedState);
         return defaultState;
       },
     }

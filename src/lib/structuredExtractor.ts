@@ -193,10 +193,10 @@ const META_LABELS: Array<{ field: keyof StructuredMetadata; pattern: RegExp; isD
 
 function toIsoDate(raw: string): string {
   // Accept dd/mm/yyyy or dd-mm-yyyy (yy → 20yy)
-  const m = raw.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+  const m = raw.match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
   if (!m) return raw;
-  let [, d, mo, y] = m;
-  if (y.length === 2) y = '20' + y;
+  const [, d, mo, yRaw] = m;
+  const y = yRaw.length === 2 ? '20' + yRaw : yRaw;
   return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
 }
 

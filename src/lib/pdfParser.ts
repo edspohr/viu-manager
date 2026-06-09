@@ -44,7 +44,7 @@ export async function pdfToText(file: File): Promise<string> {
   // If we got less than 100 chars of real text, treat as scanned and signal
   // the caller to fall back (return only the file marker, not '' so callers
   // can still see "we tried this file").
-  const realChars = total.replace(/[\[\]\s\-\n]/g, '').length;
+  const realChars = total.replace(/[[\]\s\-\n]/g, '').length;
   if (realChars < 100) return '';
   return total;
 }

@@ -52,15 +52,19 @@ export function ApprovalPage({ orderId }: ApprovalPageProps) {
   const [runError, setRunError] = useState<string | null>(null);
   const [hasStrokes, setHasStrokes] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [approved, setApproved] = useState(false);
+  // Approval state is derived from the order. We keep a local override flag
+  // for the optimistic transition right after the user signs, before the
+  // store snapshot updates.
+  const [justApprovedLocally, setJustApprovedLocally] = useState(false);
+  const setApproved = setJustApprovedLocally;
+  const approved =
+    justApprovedLocally ||
+    order?.approvalStatus === 'approved' ||
+    order?.status === 'Aceptada';
   const [approvedOrder, setApprovedOrder] = useState<Order | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastPos = useRef<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (order?.approvalStatus === 'approved' || order?.status === 'Aceptada') setApproved(true);
-  }, [order?.approvalStatus, order?.status]);
 
   // ── Canvas ────────────────────────────────────────────────────────────────
 
