@@ -61,17 +61,43 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 /**
- * Calls Gemini once. Returns the parsed extraction result.
+ * Models we'll try in order. 2.5-flash is preferred but during peak hours it
+ * returns 503 "high demand". 2.0-flash and 1.5-flash are kept as fallbacks so
+ * a single overloaded model doesn't break the flow.
+ */
+const MODEL_CHAIN = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+/** True if an error from the SDK looks like an overload / transient backend issue. */
+function isTransientGeminiError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('503') ||
+    msg.includes('service unavailable') ||
+    msg.includes('high demand') ||
+    msg.includes('overloaded') ||
+    msg.includes('unavailable') ||
+    msg.includes('500') ||
+    msg.includes('internal') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('network')
+  );
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Calls Gemini once on a specific model. Returns the parsed extraction result.
  * Throws typed errors for parse failures, empty results, etc.
  */
 async function callGemini(
   prompt: string,
   imageParts: { inlineData: { data: string; mimeType: string } }[],
-  apiKey: string
+  apiKey: string,
+  modelName: string,
 ): Promise<GeminiExtractionResult> {
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: modelName,
     generationConfig: { maxOutputTokens: 8192 } as Record<string, unknown>,
   });
 
@@ -99,6 +125,45 @@ async function callGemini(
   }
 
   return parsed;
+}
+
+/**
+ * Calls Gemini with automatic backoff retry and model fallback.
+ *
+ * For each model in MODEL_CHAIN, retries on transient errors (503/500/network)
+ * with exponential backoff (1s, 2s). On a permanent error or a successful
+ * parse, returns / re-throws immediately. If all models exhaust their retries,
+ * the last error bubbles up.
+ */
+async function callGeminiWithFallback(
+  prompt: string,
+  imageParts: { inlineData: { data: string; mimeType: string } }[],
+  apiKey: string,
+): Promise<GeminiExtractionResult> {
+  let lastErr: unknown = null;
+  for (let modelIdx = 0; modelIdx < MODEL_CHAIN.length; modelIdx++) {
+    const modelName = MODEL_CHAIN[modelIdx];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await callGemini(prompt, imageParts, apiKey, modelName);
+      } catch (err) {
+        // ParseError = model worked but didn't return valid data → don't retry / fallback
+        if (err instanceof ParseError) throw err;
+        lastErr = err;
+        if (!isTransientGeminiError(err)) {
+          // Not a transient error → don't waste attempts on other models
+          throw err;
+        }
+        console.warn(
+          `Gemini ${modelName} attempt ${attempt + 1} transient error, ` +
+            `${attempt === 0 ? 'retrying' : 'falling back to next model'}…`,
+          err,
+        );
+        if (attempt === 0) await sleep(1000 * (modelIdx + 1)); // 1s, 2s, 3s backoff
+      }
+    }
+  }
+  throw lastErr ?? new Error('La IA no pudo responder.');
 }
 
 /** Distinguishes parse/validation errors from network errors for retry logic. */
@@ -180,32 +245,15 @@ Schema: { "campaignName": string, "clientName": string, "items": ExtractedItem[]
   const imageParts = await Promise.all(files.map(fileToGenerativePart));
 
   try {
-    return await callGemini(prompt, imageParts, apiKey);
+    return await callGeminiWithFallback(prompt, imageParts, apiKey);
   } catch (err: unknown) {
-    // On ParseError (bad JSON or 0 items) — do NOT retry, surface the message
-    if (err instanceof ParseError) {
-      throw err;
-    }
-    console.error('Gemini call failed (1st attempt):', err);
-
-    // Classify the error so we can show something more useful than "network error".
+    if (err instanceof ParseError) throw err;
+    console.error('Gemini call failed after all retries/fallbacks:', err);
     const classified = classifyGeminiError(err);
     if (classified) throw classified;
-
-    // Network / transient error → one automatic retry
-    try {
-      return await callGemini(prompt, imageParts, apiKey);
-    } catch (retryErr: unknown) {
-      if (retryErr instanceof ParseError) {
-        throw retryErr;
-      }
-      console.error('Gemini call failed (retry):', retryErr);
-      const classifiedRetry = classifyGeminiError(retryErr);
-      if (classifiedRetry) throw classifiedRetry;
-      throw new Error(
-        'Error de red al contactar la IA. Intenta nuevamente en unos segundos.'
-      );
-    }
+    throw new Error(
+      'Error de red al contactar la IA. Intenta nuevamente en unos segundos.'
+    );
   }
 }
 
@@ -238,6 +286,10 @@ function classifyGeminiError(err: unknown): Error | null {
   }
   if (lower.includes('400') || lower.includes('invalid')) {
     return new Error('La IA rechazó la solicitud (formato inválido). Revisa el archivo.');
+  }
+  // 5xx after all retries/fallbacks — Google's servers are having a bad day.
+  if (lower.includes('503') || lower.includes('high demand') || lower.includes('overloaded') || lower.includes('service unavailable')) {
+    return new Error('Los servidores de IA están saturados (Google). Espera 1-2 minutos e intenta de nuevo.');
   }
 
   // Anything else: treat as transient, allow retry.
