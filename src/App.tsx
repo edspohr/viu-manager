@@ -11,6 +11,8 @@ import { QuotationDetail } from './components/quotations/QuotationDetail';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { AIQuoteWizard } from './components/wizard/AIQuoteWizard';
 import { ApprovalPage } from './components/portal/ApprovalPage';
+import { subscribeToSharedData } from './lib/firestoreListeners';
+import { hasRunMigration, runFirstLoginMigration } from './lib/firestoreMigration';
 import type { UserRole } from './store/useStore';
 
 function App() {
@@ -40,6 +42,41 @@ function App() {
       }
     }
   }, [auth.user, switchUser]);
+
+  // Firestore listener lifecycle. Runs once the user is authenticated with a
+  // staff role; unsubscribes on sign-out / role loss. Also handles the one-time
+  // per-device migration that uploads locally-modified data into Firestore.
+  useEffect(() => {
+    const role = auth.user?.role;
+    if (role !== 'admin' && role !== 'superadmin') return;
+
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+
+    (async () => {
+      if (!hasRunMigration()) {
+        try {
+          const s = useStore.getState();
+          const report = await runFirstLoginMigration({
+            materials: s.materials,
+            customers: s.customers,
+            orders: s.orders,
+            pricingConfig: s.pricingConfig,
+          });
+          console.info('[viu] migration report', report);
+        } catch (err) {
+          console.error('[viu] migration failed — will retry on next reload', err);
+        }
+      }
+      if (cancelled) return;
+      unsubscribe = subscribeToSharedData();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [auth.user?.role]);
 
   // ── Standalone approval page (public link) ────────────────────────────────
   if (approvalOrderId) {
