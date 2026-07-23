@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { useAuth } from './lib/useAuth';
 import { useStore } from './store/useStore';
 import { LoginScreen } from './components/auth/LoginScreen';
@@ -64,8 +64,22 @@ function App() {
             pricingConfig: s.pricingConfig,
           });
           console.info('[viu] migration report', report);
+          // Only surface the toast when something was actually uploaded — a
+          // brand-new device with an empty local cache doesn't need a "0
+          // materiales sincronizados" popup.
+          const uploaded =
+            report.materialsUploaded +
+            report.customersUploaded +
+            report.ordersUploaded;
+          if (uploaded > 0) {
+            toast.success(
+              `Sincronización inicial completa: ${report.materialsUploaded} materiales, ${report.customersUploaded} clientes, ${report.ordersUploaded} cotizaciones subidas.`,
+              { duration: 10000 },
+            );
+          }
         } catch (err) {
           console.error('[viu] migration failed — will retry on next reload', err);
+          toast.error('Error durante la sincronización inicial. Recarga la página para reintentar.');
         }
       }
       if (cancelled) return;
