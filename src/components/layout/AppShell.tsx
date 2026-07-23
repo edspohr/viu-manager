@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { FileText, Settings, LogOut, Users, ChevronDown } from 'lucide-react';
 import type { AppUser } from '../../lib/useAuth';
 import { Logo } from '../ui/Logo';
+import { SyncBadge } from './SyncBadge';
 import { cn } from '../../lib/utils';
 
 export type AppView = 'quotations' | 'settings';
@@ -62,6 +63,9 @@ export function AppShell({ user, view, onViewChange, onRoleManager, onSignOut, c
           </nav>
         </div>
 
+        <div className="flex items-center gap-3">
+        <SyncBadge />
+
         {/* Profile */}
         <div className="relative">
           <button
@@ -117,6 +121,7 @@ export function AppShell({ user, view, onViewChange, onRoleManager, onSignOut, c
               </motion.div>
             </>
           )}
+        </div>
         </div>
       </header>
 

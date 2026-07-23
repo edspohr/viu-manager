@@ -5,11 +5,13 @@ import { Search, Plus, Trash2, ChevronDown, ChevronRight, Upload } from 'lucide-
 import { useStore } from '../../../store/useStore';
 import { SectionHeader } from './CompanySection';
 import { cn } from '../../../lib/utils';
+import { Skeleton } from '../../ui/Skeleton';
 import type { Customer } from '../../../data/mockData';
 import { parseCustomersXlsx, mergeCustomers } from '../../../lib/customerImport';
 
 export function CustomersSection() {
   const { customers, addCustomer, updateCustomer, deleteCustomer } = useStore();
+  const hasHydrated = useStore((s) => s.hasHydratedFromFirestore);
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -118,7 +120,13 @@ export function CustomersSection() {
 
       {/* List */}
       <div className="space-y-2">
-        {filtered.length === 0 ? (
+        {!hasHydrated && customers.length === 0 ? (
+          <>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-14 w-full rounded-2xl" />
+            ))}
+          </>
+        ) : filtered.length === 0 ? (
           <p className="text-center text-sm text-zinc-400 py-12">Sin resultados</p>
         ) : (
           filtered.map((c) => (

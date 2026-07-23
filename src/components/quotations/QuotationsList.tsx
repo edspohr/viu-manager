@@ -7,6 +7,7 @@ import {
 import { useStore } from '../../store/useStore';
 import { formatCLP, formatDate } from '../../lib/formatters';
 import { cn } from '../../lib/utils';
+import { Skeleton } from '../ui/Skeleton';
 import type { QuotationStatus } from '../../data/mockData';
 
 interface QuotationsListProps {
@@ -39,6 +40,7 @@ const ALL_STATUSES: QuotationStatus[] = [
 
 export function QuotationsList({ onOpenQuote, onNewQuote }: QuotationsListProps) {
   const { orders, customers } = useStore();
+  const hasHydrated = useStore((s) => s.hasHydratedFromFirestore);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<QuotationStatus | 'all'>('all');
 
@@ -158,7 +160,19 @@ export function QuotationsList({ onOpenQuote, onNewQuote }: QuotationsListProps)
 
       {/* Table */}
       <div className="bg-white border border-zinc-200/80 rounded-2xl overflow-hidden shadow-card">
-        {filtered.length === 0 ? (
+        {!hasHydrated && orders.length === 0 ? (
+          <div className="p-6 space-y-3">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-4">
+                <Skeleton className="h-6 w-24 rounded-md" />
+                <Skeleton className="h-4 flex-1 rounded-md" />
+                <Skeleton className="h-4 w-32 rounded-md" />
+                <Skeleton className="h-5 w-20 rounded-full" />
+                <Skeleton className="h-4 w-20 rounded-md" />
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
           <EmptyState onNewQuote={onNewQuote} hasFilters={!!search || statusFilter !== 'all'} />
         ) : (
           <div className="overflow-x-auto">
