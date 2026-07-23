@@ -8,51 +8,72 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev        # Start Vite dev server
 npm run build      # TypeScript check + Vite production build
 npm run lint       # ESLint
+npm run test       # Run Vitest suite (quoteEngine + structuredExtractor)
 npm run preview    # Preview production build
 ```
 
-No test framework is configured.
-
 ## Architecture
 
-**VIU Manager** is a single-page React app for managing large-format print orders at VIU. There is no backend — all data lives in Zustand state persisted to localStorage.
+**VIU Manager** is a single-page React app for managing large-format print quotations at VIU Print. Firebase Auth handles sign-in; **Firestore is the source of truth** for all shared data (orders, materials, customers, pricing config). Zustand + localStorage remain only as a local cache for optimistic UI and offline fallback.
 
-### Core Tech
-- React 19 + TypeScript (strict mode, `noUnusedLocals`, `noUnusedParameters`)
-- Zustand 5 for state (`src/store/useStore.ts`) with localStorage persistence and versioned migration
-- Tailwind CSS 3 with `darkMode: "class"` and zinc color palette
-- `@dnd-kit` for kanban drag-and-drop
-- Google Generative AI (`@google/generative-ai`) — requires `VITE_GEMINI_API_KEY` env var
-- Framer Motion for animations
-- Sonner for toast notifications
+### Core tech
+- React 19 + TypeScript (strict, `noUnusedLocals`, `noUnusedParameters`)
+- Firebase 12 (Auth + Firestore with `persistentLocalCache` + multi-tab manager)
+- Zustand 5 (`src/store/useStore.ts`) — cache only, never the source of truth for shared data
+- Tailwind CSS 3 with zinc palette
+- `@google/generative-ai` — Gemini for AI quote extraction (`VITE_GEMINI_API_KEY`)
+- Framer Motion, Sonner, Recharts, `pdfjs-dist`, `xlsx`, `@dnd-kit`
 
-### App Structure
+### App structure
+No router. Entry: `main.tsx` → `App.tsx` → `AppShell` + view routing.
 
-There is no router. The app is a single kanban board (`KanbanBoard`) with role-based access control and modal-driven workflows.
+Views: `quotations` (list + detail overlay) and `settings` (superadmin only). The public `?order=<id>` URL renders `ApprovalPage` standalone for client sign-off.
 
-**Entry flow:** `main.tsx` → `App.tsx` → `KanbanBoard` + modals
+### Auth (`src/lib/useAuth.ts`)
+Firebase Auth (Google OAuth + email/password). On first sign-in, `ensureUserDoc` creates `users/{uid}` with role `pending` (except the initial superadmin email). A real-time `onSnapshot` on the user doc drives live role changes. `App.tsx` gates the UI: pending users see `PendingScreen`, `admin`/`superadmin` see the app.
 
-**Navigation** is modal-based:
-- `DevLoginModal` — role switcher (appears on load and via header button)
-- `AICotizadorModal` — AI-powered quote generator (admin/superadmin only), supports file uploads (PDF/JPG/PNG) passed to Gemini
-- `PricingConfigModal` — pricing config (superadmin only)
-- Inline order detail overlay inside `KanbanBoard`
+### Firestore sync layer
+
+**`src/lib/firestoreSync.ts`** — write helpers with one retry + toast on failure. Every store mutation on shared data (add/update/delete order, material, customer, pricing config) writes through here after the optimistic local update.
+
+**`src/lib/firestoreListeners.ts`** — `subscribeToSharedData()` attaches `onSnapshot` to `materials`, `customers`, `orders`, and `config/pricing`. Each snapshot replaces the corresponding store slice via `replaceOrders` / `replaceMaterials` / `replaceCustomers` / `replacePricingConfig`. Also drives the `syncStatus` slice (`connecting` → `live` / `offline` / `error`). Lifecycle managed in `App.tsx` — subscribes once the user has a staff role, unsubscribes on sign-out.
+
+**`src/lib/firestoreMigration.ts`** — `runFirstLoginMigration()` runs once per device (guarded by `viu-firestore-migrated:v1` in localStorage). Uploads any locally-cached materials / customers / orders / pricingConfig that Firestore doesn't yet have. Uses merge keys (SKU for materials, RUT for customers) so multiple users converge on a shared superset without duplicates. Skips any record whose id matches the shipped seed catalog (`src/data/mockData.ts` customers + `src/data/dipisaMaterials.ts`) *unless the user has modified it* — this keeps demo data out of production.
+
+### Firestore data model
+- `users/{uid}` — `{uid, email, displayName, photoURL, role: 'admin' | 'superadmin' | 'pending'}`
+- `orders/{orderId}` — full `Order` document
+- `materials/{materialId}` — full `Material` document (doc id = `material.id`)
+- `customers/{customerId}` — full `Customer` document (doc id = `customer.id`)
+- `config/pricing` — singleton holding the entire `PricingConfig` (segment multipliers, labor rates, finishing pricing, company data used in the PDF)
 
 ### State (`src/store/useStore.ts`)
+The store now also tracks:
+- `syncStatus: 'connecting' | 'live' | 'offline' | 'error'` — surfaced by `SyncBadge`
+- `hasHydratedFromFirestore: boolean` — flips true once the first snapshot round-trip completes. UI uses this to show skeletons instead of stale local-cache data.
+- `replaceOrders / replaceCustomers / replaceMaterials / replacePricingConfig` — called only by the listener layer.
+- `clearLocalCache()` — wipes local slices; snapshots repopulate. **There is no `resetStore` anymore** — a production device must never silently repopulate mock data.
 
-The Zustand store holds all app data:
-- `currentUser` — role (`admin | client | operations | superadmin`) and userId
-- `orders`, `customers`, `materials`, `pricingConfig`
-- Key actions: `switchUser`, `addOrder`, `updateOrderStatus`, `updateFileStatus`, `updatePricingConfig`, `resetStore`
+Persist version is `11`. On version bump, the migrate function wipes local state (Firestore will rehydrate). Only bump when the persisted shape changes; snapshot-driven fields don't need a bump.
 
-State is versioned (currently v2). If store shape changes, increment the version and add a migration case to prevent crashes on load from stale persisted state.
+### Rules (`firestore.rules`)
+`isStaff()` helper: authenticated + `users/{uid}.role in ['admin','superadmin']`. Pending users cannot read or write shared collections.
+- `orders`: `get` public (approval link), `list`/`create`/`delete`/staff-update require `isStaff()`, unauthenticated update only via `isClientApprovalUpdate()` (strict: only signature/status fields, only Enviada→Aceptada transition).
+- `materials`, `customers`, `config/**`: staff-only read + write.
+- `users`: user reads own doc, superadmin reads/updates any.
 
-### Order Workflow
+### Order workflow (statuses)
+`Borrador → Pendiente Aprobación → Aprobada Internamente → Enviada al Cliente → (Aceptada | Rechazada)`
 
-Orders move through 5 kanban columns: `Solicitud → Arte → Producción → Despacho → Terminado`
+`ApprovalPage` (public) reads a single order via `getOrderFromFirestore`, lets the client sign, and calls `syncOrderToFirestore` — the write is validated by `isClientApprovalUpdate()`.
 
-Orders have a `fileStatus` field with values `Rojo | Amarillo | Verde` indicating file readiness.
+### Connection UX
+`SyncBadge` (in `AppShell` header) shows green (Sincronizado) / amber (Sin conexión — cambios pendientes) / red (Error de sincronización). Amber trigger = `!navigator.onLine` OR listener error. Firestore's persistent cache queues writes offline and flushes on reconnect.
 
-### Styling Conventions
+Skeleton states on quotation list, materials, and customers use `hasHydratedFromFirestore` — never show mock data before the first snapshot lands.
 
-Utility function `cn()` in `src/lib/utils.ts` combines `clsx` + `tailwind-merge` — use it for conditional class merging. Role-based UI visibility is determined at render time from `currentUser.role`.
+### Styling
+`cn()` in `src/lib/utils.ts` = `clsx` + `tailwind-merge`. Role-based UI gated at render time on `auth.user.role`.
+
+### Tests
+`vitest` runs `src/lib/quoteEngine.test.ts` and `src/lib/structuredExtractor.test.ts`. No component or integration tests.
