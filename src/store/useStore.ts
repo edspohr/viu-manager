@@ -1,18 +1,25 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
-  initialOrders,
   type Order,
   type Customer,
-  customers,
-  materials,
   type Material,
   type PricingConfig,
   initialPricingConfig,
 } from '../data/mockData';
-import { syncOrderToFirestore } from '../lib/firestoreSync';
+import {
+  syncOrderToFirestore,
+  deleteOrderFromFirestore,
+  syncMaterialToFirestore,
+  deleteMaterialFromFirestore,
+  syncCustomerToFirestore,
+  deleteCustomerFromFirestore,
+  syncPricingConfigToFirestore,
+} from '../lib/firestoreSync';
 
 export type UserRole = 'admin' | 'superadmin';
+
+export type SyncStatus = 'connecting' | 'live' | 'offline' | 'error';
 
 export interface PriceChangeLog {
   orderId: string;
@@ -42,6 +49,17 @@ interface AppState {
   pricingConfig: PricingConfig;
   priceChangeLogs: PriceChangeLog[];
   statusChangeLogs: StatusChangeLog[];
+
+  // Sync
+  syncStatus: SyncStatus;
+  hasHydratedFromFirestore: boolean;
+  setSyncStatus: (status: SyncStatus) => void;
+
+  // Snapshot replacements (called by firestoreListeners)
+  replaceOrders: (orders: Order[]) => void;
+  replaceCustomers: (customers: Customer[]) => void;
+  replaceMaterials: (materials: Material[]) => void;
+  replacePricingConfig: (config: PricingConfig) => void;
 
   // User
   switchUser: (role: UserRole, userId?: string) => void;
@@ -77,18 +95,22 @@ interface AppState {
   // Export
   exportOrdersCSV: (fromDate: string, toDate: string) => void;
 
-  // Reset
-  resetStore: () => void;
+  // Local cache clear (does NOT touch Firestore — snapshots will rehydrate)
+  clearLocalCache: () => void;
 }
 
+// Empty defaults: Firestore is the source of truth. Local persisted state is a
+// cache only; on cold start we show skeletons until the first snapshot lands.
 const defaultState = {
   currentUser: { role: 'superadmin' as UserRole, id: 'superadmin1' },
-  orders: initialOrders,
-  customers: customers,
-  materials: materials,
+  orders: [] as Order[],
+  customers: [] as Customer[],
+  materials: [] as Material[],
   pricingConfig: initialPricingConfig,
   priceChangeLogs: [] as PriceChangeLog[],
   statusChangeLogs: [] as StatusChangeLog[],
+  syncStatus: 'connecting' as SyncStatus,
+  hasHydratedFromFirestore: false,
 };
 
 export const useStore = create<AppState>()(
@@ -96,60 +118,89 @@ export const useStore = create<AppState>()(
     (set, get) => ({
       ...defaultState,
 
+      setSyncStatus: (status) =>
+        set((state) => ({
+          syncStatus: status,
+          hasHydratedFromFirestore:
+            state.hasHydratedFromFirestore || status === 'live' || status === 'offline',
+        })),
+
+      replaceOrders: (orders) => set({ orders }),
+      replaceCustomers: (customers) => set({ customers }),
+      replaceMaterials: (materials) => set({ materials }),
+      replacePricingConfig: (pricingConfig) => set({ pricingConfig }),
+
       switchUser: (role, userId) => {
         const finalId = userId ?? (role === 'superadmin' ? 'superadmin1' : 'admin1');
         set({ currentUser: { role, id: finalId } });
       },
 
-      updatePricingConfig: (config) =>
-        set((state) => ({
-          pricingConfig: { ...state.pricingConfig, ...config },
-        })),
+      updatePricingConfig: (config) => {
+        const next = { ...get().pricingConfig, ...config };
+        set({ pricingConfig: next });
+        syncPricingConfigToFirestore(next).catch(() => {});
+      },
 
-      updateMaterials: (materials) => set({ materials }),
+      updateMaterials: (materials) => {
+        const prev = get().materials;
+        set({ materials });
+        // Write only the ones that actually changed.
+        const prevById = new Map(prev.map((m) => [m.id, m]));
+        for (const m of materials) {
+          if (prevById.get(m.id) !== m) syncMaterialToFirestore(m).catch(() => {});
+        }
+      },
 
-      addMaterial: (material) =>
-        set((state) => ({
-          materials: [...state.materials, material],
-        })),
+      addMaterial: (material) => {
+        set((state) => ({ materials: [...state.materials, material] }));
+        syncMaterialToFirestore(material).catch(() => {});
+      },
 
-      deleteMaterial: (materialId) =>
+      deleteMaterial: (materialId) => {
         set((state) => ({
           materials: state.materials.filter((m) => m.id !== materialId),
-        })),
+        }));
+        deleteMaterialFromFirestore(materialId).catch(() => {});
+      },
 
-      addCustomer: (customer) =>
-        set((state) => ({
-          customers: [...state.customers, customer],
-        })),
+      addCustomer: (customer) => {
+        set((state) => ({ customers: [...state.customers, customer] }));
+        syncCustomerToFirestore(customer).catch(() => {});
+      },
 
-      updateCustomer: (customer) =>
+      updateCustomer: (customer) => {
         set((state) => ({
           customers: state.customers.map((c) => (c.id === customer.id ? customer : c)),
-        })),
+        }));
+        syncCustomerToFirestore(customer).catch(() => {});
+      },
 
-      deleteCustomer: (customerId) =>
+      deleteCustomer: (customerId) => {
         set((state) => ({
           customers: state.customers.filter((c) => c.id !== customerId),
-        })),
+        }));
+        deleteCustomerFromFirestore(customerId).catch(() => {});
+      },
 
-      updateCustomerOrderCount: (customerId) =>
-        set((state) => ({
-          customers: state.customers.map((c) =>
-            c.id === customerId ? { ...c, orderCount: (c.orderCount ?? 0) + 1 } : c
-          ),
-        })),
+      updateCustomerOrderCount: (customerId) => {
+        const updated = get().customers.map((c) =>
+          c.id === customerId ? { ...c, orderCount: (c.orderCount ?? 0) + 1 } : c,
+        );
+        set({ customers: updated });
+        const changed = updated.find((c) => c.id === customerId);
+        if (changed) syncCustomerToFirestore(changed).catch(() => {});
+      },
 
       addOrder: (order) => {
         set((state) => ({ orders: [...state.orders, order] }));
-        syncOrderToFirestore(order).catch(console.error);
+        syncOrderToFirestore(order).catch(() => {});
       },
 
       updateOrder: (order) => {
         set((state) => ({
           orders: state.orders.map((o) => (o.id === order.id ? order : o)),
         }));
-        syncOrderToFirestore(order).catch(console.error);
+        syncOrderToFirestore(order).catch(() => {});
       },
 
       updateOrderStatus: (orderId, status) =>
@@ -164,7 +215,7 @@ export const useStore = create<AppState>()(
           };
           const orders = state.orders.map((o) => (o.id === orderId ? { ...o, status } : o));
           const updated = orders.find((o) => o.id === orderId);
-          if (updated) syncOrderToFirestore(updated).catch(console.error);
+          if (updated) syncOrderToFirestore(updated).catch(() => {});
           return {
             orders,
             statusChangeLogs: [...state.statusChangeLogs, log],
@@ -196,14 +247,16 @@ export const useStore = create<AppState>()(
             return { ...o, items, totalAmount };
           });
           const updated = orders.find((o) => o.id === orderId);
-          if (updated) syncOrderToFirestore(updated).catch(console.error);
+          if (updated) syncOrderToFirestore(updated).catch(() => {});
           return { orders, priceChangeLogs: [...state.priceChangeLogs, log] };
         }),
 
-      deleteOrder: (orderId) =>
+      deleteOrder: (orderId) => {
         set((state) => ({
           orders: state.orders.filter((o) => o.id !== orderId),
-        })),
+        }));
+        deleteOrderFromFirestore(orderId).catch(() => {});
+      },
 
       submitForApproval: (orderId) => {
         get().updateOrderStatus(orderId, 'Pendiente Aprobación');
@@ -231,7 +284,7 @@ export const useStore = create<AppState>()(
                 }
           );
           const updated = orders.find((o) => o.id === orderId);
-          if (updated) syncOrderToFirestore(updated).catch(console.error);
+          if (updated) syncOrderToFirestore(updated).catch(() => {});
           return {
             orders,
             statusChangeLogs: [...state.statusChangeLogs, log],
@@ -258,7 +311,7 @@ export const useStore = create<AppState>()(
                 }
           );
           const updated = orders.find((o) => o.id === orderId);
-          if (updated) syncOrderToFirestore(updated).catch(console.error);
+          if (updated) syncOrderToFirestore(updated).catch(() => {});
           return {
             orders,
             statusChangeLogs: [...state.statusChangeLogs, log],
@@ -280,7 +333,7 @@ export const useStore = create<AppState>()(
               : { ...o, status: 'Rechazada' as const, rejectionReason: reason }
           );
           const updated = orders.find((o) => o.id === orderId);
-          if (updated) syncOrderToFirestore(updated).catch(console.error);
+          if (updated) syncOrderToFirestore(updated).catch(() => {});
           return {
             orders,
             statusChangeLogs: [...state.statusChangeLogs, log],
@@ -309,7 +362,7 @@ export const useStore = create<AppState>()(
                 }
           );
           const updated = orders.find((o) => o.id === orderId);
-          if (updated) syncOrderToFirestore(updated).catch(console.error);
+          if (updated) syncOrderToFirestore(updated).catch(() => {});
           return {
             orders,
             statusChangeLogs: [...state.statusChangeLogs, log],
@@ -362,17 +415,37 @@ export const useStore = create<AppState>()(
         URL.revokeObjectURL(url);
       },
 
-      resetStore: () => set(defaultState),
+      // Clear the local cache only. Firestore stays untouched — snapshots will
+      // rehydrate the store on the next tick. Never repopulates mock data.
+      clearLocalCache: () =>
+        set({
+          orders: [],
+          customers: [],
+          materials: [],
+          priceChangeLogs: [],
+          statusChangeLogs: [],
+          hasHydratedFromFirestore: false,
+        }),
     }),
     {
       name: 'viu-manager-storage',
-      version: 10,
-      migrate: (persistedState, fromVersion) => {
-        // v10: seed DIPISA materials + 12 default clients — clean reset.
-        // Logged so we can see in DevTools when a migration actually fires.
-        console.info('viu-manager store: migrating from v' + fromVersion, persistedState);
+      version: 11,
+      migrate: (_persistedState, fromVersion) => {
+        // v11: Firestore is source of truth. Wipe local cache on migration so
+        // no stale mock data lingers; snapshots will repopulate on next load.
+        console.info('viu-manager store: migrating from v' + fromVersion + ' → v11 (Firestore backed)');
         return defaultState;
       },
+      // syncStatus/hasHydratedFromFirestore are runtime concerns; don't persist.
+      partialize: (state) => ({
+        currentUser: state.currentUser,
+        orders: state.orders,
+        customers: state.customers,
+        materials: state.materials,
+        pricingConfig: state.pricingConfig,
+        priceChangeLogs: state.priceChangeLogs,
+        statusChangeLogs: state.statusChangeLogs,
+      }),
     }
   )
 );
